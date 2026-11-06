@@ -16,6 +16,11 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Zones and Dungeons tabs** (WoW Forever) — your zone's quests on one tab, dungeon quests on the other, grouped under each dungeon's name.
 - **Click a line to track that quest** — your choice holds until you reach it or clear it. VoidQuest never takes over an arrow you set yourself.
 - **Hover to read, right-click to open** — hovering a quest line shows what to do and the start of its story; right-click opens the whole quest in your quest log.
+- **Coloured by level** — quest lines use the quest log's colours: gray (far below you), green, yellow (your level), orange, red (too high for now).
+- **Who in your group is on it** — a small blue badge at the right of a line counts the group members on that quest too; hover for their names.
+
+### Quest rewards
+- **Upgrade or gold** — when a quest lets you choose, a green arrow marks the reward that's an upgrade for you (stat-based with VoidGear, otherwise item level) and a gold coin marks the one worth the most gold. Hover a reward for why. You still pick.
 
 ### Hands-free (optional)
 - **Auto accept and turn in** — for the campaign you follow, or every quest if you want.
@@ -53,6 +58,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 | `/vq zones` | Zone guides (retail) / every quest in your zone (WoW Forever) |
 | `/vq arrow` | Arrow on / off |
 | `/vq box` | Show or hide the players online box |
+| `/vq rewards` | Reward advice on quest choices on / off |
 | `/vq share` | WoW Forever: sharing quest givers on / off |
 | `/vq net` | WoW Forever: check that sharing gets through |
 | `/vq reset` | Put the panel back in the middle of the screen |

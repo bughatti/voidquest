@@ -3268,6 +3268,80 @@ local function MoreTip(list)
 end
 
 -- Draw up to `fit` lines below `anchor` (a region on f). Returns lines used.
+-- A quest title's colour for its level vs yours, as Blizzard's quest log does it:
+-- gray (far below you), green, yellow (about your level), orange, red (well above).
+-- "ffffff" when the level isn't known.
+local function LevelColor(qid)
+    local lvl = qid and safe(C_QuestLog.GetQuestDifficultyLevel, qid)
+    if not lvl or Secret(lvl) or lvl <= 0 or not GetQuestDifficultyColor then return "ffffff", nil end
+    local ok, c = pcall(GetQuestDifficultyColor, lvl, false, qid)
+    if not ok or type(c) ~= "table" or type(c.r) ~= "number" then return "ffffff", lvl end
+    local function hex(v) return math.floor(math.max(0, math.min(1, v)) * 255 + 0.5) end
+    return ("%02x%02x%02x"):format(hex(c.r), hex(c.g), hex(c.b)), lvl
+end
+
+-- Who in your group (party or raid, not you) is on this quest: count and names.
+-- C_QuestLog.IsUnitOnQuest is what Blizzard's own quest log uses for party members.
+local function GroupOnQuest(qid)
+    if not (qid and IsInGroup and IsInGroup() and C_QuestLog.IsUnitOnQuest) then return 0, nil end
+    local names = {}
+    local raid = IsInRaid and IsInRaid()
+    for i = 1, raid and 40 or 4 do
+        local unit = (raid and "raid" or "party") .. i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+            local ok, on = pcall(C_QuestLog.IsUnitOnQuest, unit, qid)
+            if ok and not (issecretvalue and issecretvalue(on)) and on == true then
+                local n = UnitName(unit)
+                if n and not (issecretvalue and issecretvalue(n)) then names[#names + 1] = n end
+            end
+        end
+    end
+    return #names, (#names > 0) and table.concat(names, ", ") or nil
+end
+
+-- Put a group count at the right of a line's text (fs = the line's text, holder = the
+-- frame it sits in): a white number on a solid blue badge, so it reads over any ground
+-- behind a see-through panel (plain coloured digits got lost, 2026-11-06). The text stops
+-- short of the badge so they never overlap.
+local function SetLineParty(holder, fs, n)
+    if not holder.partyBg then
+        local bg = holder:CreateTexture(nil, "ARTWORK")
+        bg:SetColorTexture(0.05, 0.32, 0.85, 1)
+        bg:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+        bg:SetHeight(11)
+        holder.partyBg = bg
+        holder.party = holder:CreateFontString(nil, "OVERLAY"); VQ:SetFont(holder.party, 9, "")
+        holder.party:SetPoint("CENTER", bg, "CENTER", 0, 0)
+        holder.party:SetTextColor(1, 1, 1)
+    end
+    fs:ClearAllPoints()
+    fs:SetPoint("TOPLEFT", holder, "TOPLEFT"); fs:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT")
+    if n and n > 0 then
+        holder.party:SetText(tostring(n))
+        holder.partyBg:SetWidth(math.max(11, (holder.party:GetStringWidth() or 6) + 6))
+        holder.partyBg:Show(); holder.party:Show()
+        fs:SetPoint("RIGHT", holder.partyBg, "LEFT", -4, 0)
+    else
+        holder.party:SetText(""); holder.party:Hide(); holder.partyBg:Hide()
+        fs:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+    end
+end
+local function SetRowParty(row, n) SetLineParty(row, row.text, n) end
+
+-- A quest's tooltip plus who in your group is on it.
+local function QuestTipWithGroup(qid, zone, groupNames)
+    local base = QuestTip(qid, zone)
+    return function(s)
+        base(s)
+        local _, lvl = LevelColor(qid)
+        if lvl then GameTooltip:AddLine(("Quest level %d (you: %d)"):format(lvl, UnitLevel("player") or 0), .7, .7, .7) end
+        if groupNames then
+            GameTooltip:AddLine("In your group on this quest: " .. groupNames, .53, .8, 1, true)
+        end
+        GameTooltip:Show()   -- resize for the added lines
+    end
+end
+
 function mod:RenderQuestBlock(f, anchor, fit, skip)
     local entries, rest = self:QuestBlockEntries(skip)
     local tracked = safe(C_SuperTrack.GetSuperTrackedQuestID)
@@ -3313,13 +3387,17 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             local tag = (e.kind == "wq" and " |cff88ccff[WQ]|r") or (e.kind == "task" and " |cff88ccff[bonus]|r")
                 or (e.zone and (" |cff888888[%s]|r"):format(e.zone)) or ""
             local sum = ObjSummary(qid)
-            text = ("%s|cffffffff%s|r%s%s"):format(mark, truncTo(QuestTitle(e), 28), tag,
+            text = ("%s|cff%s%s|r%s%s"):format(mark, (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
                 sum ~= "" and ("|cffaaaaaa: %s|r"):format(sum) or "")
-            row.tip = QuestTip(qid, e.zone)
+            local nGroup, groupNames = GroupOnQuest(qid)
+            row.tip = QuestTipWithGroup(qid, e.zone, groupNames)
+            row.partyN = nGroup
             row:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
                 if btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
             end)
         end
+        SetRowParty(row, row.partyN or 0)   -- 0 for events, coffers and group titles
+        row.partyN = nil
         row.text:SetText(text)
         row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (i - 1) * QROW)
         row:Show()
@@ -3331,6 +3409,7 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
     if nHidden > 0 and fit > used then
         used = used + 1
         local row = BlockRow(f, used)
+        SetRowParty(row, 0)
         row.text:SetText(("|cff88ccff+%d more quest%s|r |cff888888- hover to list, click to open|r"):format(
             nHidden, nHidden == 1 and "" or "s"))
         row.tip = MoreTip(hidden)
@@ -3551,6 +3630,7 @@ function mod:RenderQuestList(f, popH)
         end
         row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top)
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - 13)
+        SetLineParty(row.btn, row.title, 0)
         row.title:SetText("|cffffd200" .. truncTo(scen.name, 36) .. "|r |cff88ccff[event]|r")
         row.obj:SetText(truncTo(scen.obj, 52)); row.obj:SetWidth(CW() - 4)
         if row.bar then row.bar:Hide() end
@@ -3584,7 +3664,7 @@ function mod:RenderQuestList(f, popH)
             or (dungeonQ[qid] and " |cff88ccff[dungeon]|r")
             or (zoneTag[qid] and (" |cff888888[%s]|r"):format(zoneTag[qid])) or ""
         local mark = (qid == tracked) and "|cff55ff55> |r" or ""
-        row.title:SetText(mark .. (complete and "|cff55ff55" or "|cffffffff") .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
+        row.title:SetText(mark .. "|cff" .. (LevelColor(qid)) .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
         local obj = ""
         local pct = (not complete) and ProgressPercent(qid) or nil
         if complete then
@@ -3604,7 +3684,9 @@ function mod:RenderQuestList(f, popH)
         row.btn:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
             if btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
         end)
-        row.btn:SetScript("OnEnter", QuestTip(qid, zoneTag[qid]))
+        local nGroup, groupNames = GroupOnQuest(qid)
+        SetLineParty(row.btn, row.title, nGroup)
+        row.btn:SetScript("OnEnter", QuestTipWithGroup(qid, zoneTag[qid], groupNames))
         row.btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.btn:Show(); row.obj:Show()
     end
@@ -3624,6 +3706,7 @@ function mod:RenderQuestList(f, popH)
         end
         row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH)
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - (ri - 1) * ROWH - 13)
+        SetLineParty(row.btn, row.title, 0)   -- a reused quest row: no leftover group badge
         row.title:SetText("|cffffffff" .. truncTo(rec.name, 34) .. "|r |cff88ccff[recipe]|r")
         row.obj:SetText(truncTo(rec.obj, 52)); row.obj:SetWidth(CW() - 4)
         if row.bar then row.bar:Hide() end
@@ -3638,6 +3721,7 @@ function mod:RenderQuestList(f, popH)
     end
     if #overflow > 0 and moreFits then
         local row = BlockRow(f, 1)
+        SetRowParty(row, 0)
         row.text:SetText(("|cff88ccff+%d more quest%s|r |cff888888- hover to list, click to open|r"):format(
             #overflow, #overflow == 1 and "" or "s"))
         row.tip = MoreTip(overflow)
@@ -4437,6 +4521,8 @@ do
                          "USER_WAYPOINT_UPDATED",   -- your own map pin -> manual hold
                          "PLAYER_REGEN_ENABLED",    -- re-apply Blizz-tracker hide after combat
                          "QUEST_AUTOCOMPLETE",      -- auto-quest offer/turn-in popups appear
+                         "GROUP_ROSTER_UPDATE",     -- group counts on quest lines (GroupOnQuest)
+                         "UNIT_QUEST_LOG_CHANGED",  -- a party member took or finished a quest
                          "TASK_PROGRESS_UPDATE",    -- in-area bonus objectives / world quests
                          "SCENARIO_UPDATE",         -- zone events (Temple Strikes etc.) start/stage
                          "SCENARIO_CRITERIA_UPDATE", -- zone-event objective progress

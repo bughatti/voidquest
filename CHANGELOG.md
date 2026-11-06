@@ -1,5 +1,12 @@
 # VoidQuest Changelog
 
+## 0.2.3 (beta)
+
+- **Quest lines are coloured by level**, like the quest log: gray (far below you), green, yellow (your level), orange, red (too high for now). Hover a line for its level.
+- **See who in your group is on each quest**: a small blue badge at the right of a line counts the group members who have it too, and the line's tooltip names them. Works in parties and raids.
+- **Reward advice on quest choices**: a green arrow on the reward that's an upgrade for you (with VoidGear installed it compares stats for your class and spec, otherwise item level), and a gold coin on the one worth the most gold (most quest rewards bind when picked up, so that's the vendor price). Hover the reward for why. You still pick; `/vq rewards` turns it off.
+- **WoW Forever:** ships with 148 known quest givers (was 122).
+
 ## 0.2.2 (beta)
 
 - **Read a quest by hovering it.** The tooltip on a quest line now shows what to do and the start of the quest's story, plus your progress.
