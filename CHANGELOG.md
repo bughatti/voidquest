@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.2.2 (beta)
+
+- **Read a quest by hovering it.** The tooltip on a quest line now shows what to do and the start of the quest's story, plus your progress.
+- **Right-click a quest line** to open the whole quest in the quest log (left-click still tracks it). Works in the "My Quests" list too, which now has the same tooltip.
+- Settings buttons are wide enough for their text ("My quests (all, not just campaign)..." spilled out), and the leveling coach's line follows the panel's width when you resize it.
+
 ## 0.2.1 (beta)
 
 - **Drag to resize the panel** — a grip in its bottom-right corner. Bigger shows more quests, wider fits longer names.

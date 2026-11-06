@@ -587,6 +587,7 @@ function mod:RenderStrip(f, top)
         c.go:SetScript("OnClick", function() mod:Go() end)
         c.zones = CreateFrame("Button", nil, c, "UIPanelButtonTemplate"); c.zones:SetSize(80, 18)
         c.zones:SetText("All zones...")
+        if VQ.FitButton then VQ.FitButton(c.zones, 80) end   -- text fits its button
         c.zones:SetScript("OnClick", function() if VQ.Zones then VQ.Zones:ToggleWindow() end end)
         -- The panel has a fixed height now (quest lines fill the rest), so the general tip and
         -- the max-level story's explainer live in a tooltip on the title instead of taking
@@ -607,6 +608,10 @@ function mod:RenderStrip(f, top)
         f.coach = c
     end
     c:ClearAllPoints(); c:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -27 - top)
+    -- follow the panel's width (it can be resized: its divider stuck out past a narrowed
+    -- panel, 2026-11-05)
+    local w = math.max(100, (f:GetWidth() or 300) - 16)
+    c:SetWidth(w); c.title:SetWidth(w); c.detail:SetWidth(w)
     c.title:SetText(("|cff00c7ff%s|r |cff55ff55%s|r"):format(s.head or ("Step %d of 4:"):format(s.n), s.title))
     -- once a zone guide is walking you (step 4, nothing to start), one line is enough:
     -- the panel below shows the actual step

@@ -107,6 +107,16 @@ local function makeSlider(f, x, y, w, label, key, minv, maxv, step, plain)
     return s
 end
 
+-- A button's text must fit inside it: widen it to the text (+ padding), never below minW.
+-- (Fixed widths let "My quests (all, not just campaign)..." spill out both sides, 2026-11-05.)
+local function fitButton(b, minW)
+    local fs = b:GetFontString()
+    local tw = fs and fs:GetStringWidth() or 0
+    b:SetWidth(math.max(minW or 0, math.ceil(tw) + 20))
+    return b:GetWidth()
+end
+VQ.FitButton = fitButton
+
 local function makeSegment(f, x, y, label, key, opts)
     local fs = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(fs, 11)
     fs:SetPoint("TOPLEFT", x, y - 2); fs:SetText(label)
@@ -118,8 +128,9 @@ local function makeSegment(f, x, y, label, key, opts)
     end
     for _, o in ipairs(opts) do
         local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetSize(52, 20); b:SetPoint("TOPLEFT", bx, y); bx = bx + 55
+        b:SetHeight(20); b:SetPoint("TOPLEFT", bx, y)
         b:SetText(o.text); b.val = o.val
+        bx = bx + fitButton(b, 52) + 3
         b:SetScript("OnClick", function() VQ:Set(key, o.val); hl() end)
         btns[#btns + 1] = b
     end
@@ -167,22 +178,22 @@ function mod:EnsurePanel()
     makeSegment(f, x, y, "Density", "density", { { val = "min", text = "Min" }, { val = "mid", text = "Mid" }, { val = "max", text = "Max" } }); y = y - 26
     makeSegment(f, x, y, "Zone order", "zoneOrder", { { val = "nearest", text = "Nearest" }, { val = "grouped", text = "Grouped" } }); y = y - 28
     local csb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    csb:SetSize(220, 20); csb:SetPoint("TOPLEFT", x, y); csb:SetText("Select campaign to follow...")
+    csb:SetSize(220, 20); csb:SetPoint("TOPLEFT", x, y); csb:SetText("Select campaign to follow..."); fitButton(csb, 220)
     csb:SetScript("OnClick", function() if VQ.Guide and VQ.Guide.ToggleCampaignSelect then VQ.Guide:ToggleCampaignSelect() end end)
     y = y - 26
     local qlb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    qlb:SetSize(220, 20); qlb:SetPoint("TOPLEFT", x, y); qlb:SetText("My quests (all, not just campaign)...")
+    qlb:SetSize(220, 20); qlb:SetPoint("TOPLEFT", x, y); qlb:SetText("My quests (all, not just campaign)..."); fitButton(qlb, 220)
     qlb:SetScript("OnClick", function() if VQ.Guide and VQ.Guide.ToggleQuestLog then VQ.Guide:ToggleQuestLog() end end)
     y = y - 26
     local zgb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    zgb:SetSize(220, 20); zgb:SetPoint("TOPLEFT", x, y); zgb:SetText("Zone guides (leveling)...")
+    zgb:SetSize(220, 20); zgb:SetPoint("TOPLEFT", x, y); zgb:SetText("Zone guides (leveling)..."); fitButton(zgb, 220)
     zgb:SetScript("OnClick", function() if VQ.Zones then VQ.Zones:ToggleWindow() end end)
     y = y - 34
 
     header(f, x, y, "Guide panel"); y = y - 24
     makeCheck(f, x, y, "Show objective text", "showObjective"); y = y - 24
     makeCheck(f, x, y, "Show zone summary line", "showZoneSummary"); y = y - 24
-    makeCheck(f, x, y, "Lock panel position", "lockPanel"); y = y - 32
+    makeCheck(f, x, y, "Lock panel position", "lockPanel"); y = y - 42   -- room for the slider label above its bar
     makeSlider(f, x, y, 210, "Scale", "panelScale", 0.7, 1.6, 0.05); y = y - 42
     makeSlider(f, x, y, 210, "Opacity", "panelOpacity", 0.1, 1.0, 0.05); y = y - 42
     makeSlider(f, x, y, 210, "Height", "panelHeight", 120, 800, 10, true); y = y - 44

@@ -556,6 +556,7 @@ function mod:EnsureWindow()
     end)
     p.stop = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     p.stop:SetSize(160, 20); p.stop:SetPoint("TOPRIGHT", -12, -46); p.stop:SetText("Stop (back to campaign)")
+    if VQ.FitButton then VQ.FitButton(p.stop, 160) end   -- text fits its button
     p.stop:SetScript("OnClick", function() mod:Stop() end)
 
     p.showDone = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")

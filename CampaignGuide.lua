@@ -3163,7 +3163,7 @@ local function BlockRow(f, i)
     if row then return row end
     row = CreateFrame("Button", nil, f)
     row:SetSize(CW(), QROW)
-    row:RegisterForClicks("LeftButtonUp")
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row.text = row:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.text, 10)
     row.text:SetAllPoints(); row.text:SetJustifyH("LEFT"); row.text:SetWordWrap(false)
     row:SetScript("OnEnter", function(s) if s.tip then s.tip(s) end end)
@@ -3184,6 +3184,33 @@ function mod:QuestHint(qid)
     return t and QUEST_HINTS[NormName(t)]
 end
 
+-- Right-click a quest line: its full page in Blizzard's quest log (left-click tracks it).
+local function OpenQuestDetails(qid)
+    if not qid then return end
+    if QuestMapFrame_OpenToQuestDetails then
+        if pcall(QuestMapFrame_OpenToQuestDetails, qid) then return end
+    end
+    VQ:Print("couldn't open the quest log here (in combat?). Try again after the fight.")
+end
+mod.OpenQuestDetails = OpenQuestDetails
+
+-- The quest's own words for the hover: "what to do" (the log's short text) and the start of
+-- its story, cut so the tooltip stays readable (the whole page is a right-click away).
+local STORY_MAX = 320
+local function Secret(v) return issecretvalue and issecretvalue(v) end
+local function QuestText(qid)
+    local idx = safe(C_QuestLog.GetLogIndexForQuestID, qid)
+    if not idx or not GetQuestLogQuestText then return nil, nil end
+    local ok, story, todo = pcall(GetQuestLogQuestText, idx)
+    if not ok then return nil, nil end
+    if type(story) ~= "string" or Secret(story) then story = nil end
+    if type(todo) ~= "string" or Secret(todo) then todo = nil end
+    if story and #story > STORY_MAX then
+        story = story:sub(1, STORY_MAX):gsub("[\192-\255][\128-\191]*$", ""):gsub("%s+%S*$", "") .. "..."
+    end
+    return story ~= "" and story or nil, todo ~= "" and todo or nil
+end
+
 local function QuestTip(qid, zone)
     return function(s)
         GameTooltip:SetOwner(s, "ANCHOR_LEFT")
@@ -3191,6 +3218,10 @@ local function QuestTip(qid, zone)
         if zone then GameTooltip:AddLine(zone, .53, .8, 1) end
         local hint = mod:QuestHint(qid)
         if hint then GameTooltip:AddLine(hint, 1, .82, 0, true) end
+        local story, todo = QuestText(qid)
+        if todo then GameTooltip:AddLine(todo, 1, 1, 1, true) end
+        if story then GameTooltip:AddLine(story, .75, .75, .75, true) end
+        if todo or story then GameTooltip:AddLine(" ") end
         if safe(C_QuestLog.IsComplete, qid) then
             GameTooltip:AddLine("Ready to turn in", .33, 1, .33)
         else
@@ -3201,7 +3232,8 @@ local function QuestTip(qid, zone)
                 end
             end
         end
-        GameTooltip:AddLine("Click: track it (arrow). Click again to stop.", .6, .6, .6)
+        GameTooltip:AddLine("Left-click: track it (arrow); again to stop.", .6, .6, .6)
+        GameTooltip:AddLine("Right-click: open the whole quest.", .6, .6, .6)
         GameTooltip:Show()
     end
 end
@@ -3284,7 +3316,9 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             text = ("%s|cffffffff%s|r%s%s"):format(mark, truncTo(QuestTitle(e), 28), tag,
                 sum ~= "" and ("|cffaaaaaa: %s|r"):format(sum) or "")
             row.tip = QuestTip(qid, e.zone)
-            row:SetScript("OnClick", function() mod:ToggleTrack(qid); mod:Refresh() end)
+            row:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
+                if btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
+            end)
         end
         row.text:SetText(text)
         row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (i - 1) * QROW)
@@ -3508,7 +3542,7 @@ function mod:RenderQuestList(f, popH)
         if not row then
             row = {}
             row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(CW(), 13)
-            row.btn:RegisterForClicks("LeftButtonUp")
+            row.btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             row.title = row.btn:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.title, 11)
             row.title:SetAllPoints(row.btn); row.title:SetJustifyH("LEFT")
             row.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.obj, 9)
@@ -3520,7 +3554,7 @@ function mod:RenderQuestList(f, popH)
         row.title:SetText("|cffffd200" .. truncTo(scen.name, 36) .. "|r |cff88ccff[event]|r")
         row.obj:SetText(truncTo(scen.obj, 52)); row.obj:SetWidth(CW() - 4)
         if row.bar then row.bar:Hide() end
-        row.btn:SetScript("OnClick", nil)
+        row.btn:SetScript("OnClick", nil); row.btn:SetScript("OnEnter", nil)   -- no leftover quest tooltip
         row.btn:Show(); row.obj:Show()
     end
     for i, qid in ipairs(quests) do
@@ -3529,7 +3563,7 @@ function mod:RenderQuestList(f, popH)
         if not row then
             row = {}
             row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(CW(), 13)
-            row.btn:RegisterForClicks("LeftButtonUp")
+            row.btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             row.title = row.btn:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.title, 11)
             row.title:SetAllPoints(row.btn); row.title:SetJustifyH("LEFT")
             row.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.obj, 9)
@@ -3567,7 +3601,11 @@ function mod:RenderQuestList(f, popH)
         row.obj:SetWidth(pct and (CW() - 94) or (CW() - 4))   -- room for the 80 px bar
         row.bar:ClearAllPoints(); row.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, top - (ri - 1) * ROWH - 14)
         SetProgress(row.bar, pct)
-        row.btn:SetScript("OnClick", function() mod:ToggleTrack(qid); mod:Refresh() end)
+        row.btn:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
+            if btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
+        end)
+        row.btn:SetScript("OnEnter", QuestTip(qid, zoneTag[qid]))
+        row.btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.btn:Show(); row.obj:Show()
     end
     -- tracked profession recipes at the bottom (non-clickable, like Blizzard's Profession block)
@@ -3577,7 +3615,7 @@ function mod:RenderQuestList(f, popH)
         if not row then
             row = {}
             row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(CW(), 13)
-            row.btn:RegisterForClicks("LeftButtonUp")
+            row.btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             row.title = row.btn:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.title, 11)
             row.title:SetAllPoints(row.btn); row.title:SetJustifyH("LEFT")
             row.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.obj, 9)
@@ -3589,7 +3627,7 @@ function mod:RenderQuestList(f, popH)
         row.title:SetText("|cffffffff" .. truncTo(rec.name, 34) .. "|r |cff88ccff[recipe]|r")
         row.obj:SetText(truncTo(rec.obj, 52)); row.obj:SetWidth(CW() - 4)
         if row.bar then row.bar:Hide() end
-        row.btn:SetScript("OnClick", nil)
+        row.btn:SetScript("OnClick", nil); row.btn:SetScript("OnEnter", nil)   -- no leftover quest tooltip
         row.btn:Show(); row.obj:Show()
     end
 

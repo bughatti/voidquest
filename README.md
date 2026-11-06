@@ -15,6 +15,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Drag to resize** — pull the corner grip to make the panel bigger or smaller; it fills the space with your quests, and only what doesn't fit becomes "+N more" (hover to list, click to open).
 - **Zones and Dungeons tabs** (WoW Forever) — your zone's quests on one tab, dungeon quests on the other, grouped under each dungeon's name.
 - **Click a line to track that quest** — your choice holds until you reach it or clear it. VoidQuest never takes over an arrow you set yourself.
+- **Hover to read, right-click to open** — hovering a quest line shows what to do and the start of its story; right-click opens the whole quest in your quest log.
 
 ### Hands-free (optional)
 - **Auto accept and turn in** — for the campaign you follow, or every quest if you want.
