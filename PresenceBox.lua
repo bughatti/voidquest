@@ -1,0 +1,161 @@
+----------------------------------------------------------------------
+-- Void "players here" box -- how many other players of each Void addon
+-- that shares over a hidden channel (VoidGather, VoidSweep, VoidQuest on WoW
+-- Forever) are in your zone (Forever: online).
+--
+-- The same file is copied into each of those addons (source of truth:
+-- wow-addons/_shared/PresenceBox.lua; never a shared library). The first copy
+-- that loads builds the box and the global VoidPresence; each addon reports
+-- its own line with VoidPresence:Set(). Drag to move, right-click for
+-- options. On/off and position are kept in VoidPresenceDB (account-wide; each
+-- addon's TOC lists it).
+----------------------------------------------------------------------
+if _G.VoidPresence then return end
+
+local P = { lines = {}, listeners = {} }   -- lines: addon -> { label, count, capped, known }
+_G.VoidPresence = P
+
+-- fn() runs when the box is turned on (from any addon), so every addon counts now.
+function P:Listen(fn) table.insert(self.listeners, fn) end
+
+local A = { 0, 0.78, 1 }   -- Void cyan
+local box
+
+local function db()
+    VoidPresenceDB = VoidPresenceDB or {}
+    return VoidPresenceDB
+end
+
+-- WoW Forever can't count by zone (its channels carry no addon messages), so there the
+-- box counts each addon's players online and says so in its title.
+local function FOREVER() return RegionalUniqueNamesEnabled ~= nil and RegionalUniqueNamesEnabled() == true end
+local function TITLE() return FOREVER() and "Players online" or "Players here" end
+
+-- Every addon that carries this file saves VoidPresenceDB, and each one's copy
+-- is restored as it loads, so the last to load would win even if it was
+-- disabled last session and holds old settings. Each change is stamped, and as
+-- each addon loads the newest copy is kept.
+local HOSTS = { VoidGather = true, VoidSweep = true, VoidQuest = true }   -- addons that carry this file
+local newest
+local loader = CreateFrame("Frame")
+loader:RegisterEvent("ADDON_LOADED")
+loader:SetScript("OnEvent", function(_, _, name)
+    if not HOSTS[name] then return end
+    local cur = _G.VoidPresenceDB
+    if type(cur) == "table" and (not newest or (cur.stamp or 0) > (newest.stamp or 0)) then newest = cur end
+    _G.VoidPresenceDB = newest
+end)
+
+local function changed() db().stamp = time() end
+
+-- count = other players heard in your zone; capped = answers stopped at the
+-- cap (busy zone, show "10+"); known = false when it can't count (sharing
+-- off, inside an instance).
+function P:Set(addon, label, count, capped, known)
+    self.lines[addon] = { label = label, count = count or 0, capped = capped, known = known ~= false }
+    self:Update()
+end
+
+function P:IsShown() return db().shown == true end
+
+function P:SetShown(on)
+    db().shown = on and true or false
+    changed()
+    self:Update()
+    if on then
+        for _, fn in ipairs(self.listeners) do pcall(fn) end
+    end
+end
+
+local function build()
+    local f = CreateFrame("Button", "VoidPresenceBox", UIParent, "BackdropTemplate")
+    f:SetSize(150, 40)
+    f:SetFrameStrata("MEDIUM")
+    f:SetClampedToScreen(true)
+    f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    f:SetBackdropColor(0.05, 0.05, 0.08, 0.8)
+    f:SetBackdropBorderColor(A[1], A[2], A[3], 0.45)
+    local p = db().pos
+    if p then f:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else f:SetPoint("TOP", UIParent, "TOP", 0, -205) end
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:RegisterForClicks("RightButtonUp")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local pt, _, rel, x, y = self:GetPoint()
+        db().pos = { pt, rel, x, y }
+        changed()
+    end)
+    f:SetScript("OnClick", function(self)
+        if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+        MenuUtil.CreateContextMenu(self, function(_, root)
+            root:CreateTitle(TITLE())
+            root:CreateButton("Hide the box", function() P:SetShown(false) end)
+        end)
+    end)
+    f:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(TITLE())
+        if FOREVER() then
+            GameTooltip:AddLine("Other players online running each Void addon, counted from its sharing channel. Updates every 10 minutes. (WoW Forever can't count by zone.)", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Not counted with sharing off.", 0.6, 0.6, 0.6, true)
+        else
+            GameTooltip:AddLine("Other players in your zone running each Void addon, counted over its sharing channel. Updates when people come and go, and every 10 minutes.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Busy zones show 10+. Not counted in instances or with sharing off.", 0.6, 0.6, 0.6, true)
+        end
+        GameTooltip:AddLine("Drag to move · right-click for options", 0.4, 0.8, 1)
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.title:SetPoint("TOPLEFT", 8, -5)
+    f.title:SetTextColor(A[1], A[2], A[3])
+    f.title:SetText(TITLE())
+    f.rows = {}
+    f:Hide()
+    return f
+end
+
+function P:Update()
+    if not self:IsShown() or not next(self.lines) then
+        if box then box:Hide() end
+        return
+    end
+    box = box or build()
+    local names = {}
+    for addon in pairs(self.lines) do names[#names + 1] = addon end
+    table.sort(names)
+    local width = box.title:GetStringWidth() + 16
+    for i, addon in ipairs(names) do
+        local l = self.lines[addon]
+        local row = box.rows[i]
+        if not row then
+            row = { left = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
+                    right = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") }
+            box.rows[i] = row
+        end
+        row.left:SetPoint("TOPLEFT", 8, -6 - i * 13)
+        row.right:SetPoint("TOPRIGHT", -8, -6 - i * 13)
+        row.left:SetText(l.label)
+        if not l.known then
+            row.right:SetText("|cff8c8c9e—|r")
+        elseif l.capped and l.count == 0 then
+            -- busy zone, and everyone we'd counted has left: others are still there
+            row.right:SetText("|cff55ff55some|r")
+        elseif l.count == 0 then
+            row.right:SetText("|cff8c8c9e0|r")
+        else
+            row.right:SetText(("|cff55ff55%d%s|r"):format(l.count, l.capped and "+" or ""))
+        end
+        row.left:Show(); row.right:Show()
+        width = math.max(width, row.left:GetStringWidth() + row.right:GetStringWidth() + 28)
+    end
+    for i = #names + 1, #box.rows do box.rows[i].left:Hide(); box.rows[i].right:Hide() end
+    box:SetSize(math.max(130, width), 12 + (#names + 1) * 13)
+    box:Show()
+end
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("PLAYER_LOGIN")
+f:SetScript("OnEvent", function() P:Update() end)

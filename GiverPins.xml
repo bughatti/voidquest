@@ -1,0 +1,15 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!--
+        VoidQuest quest-giver halo pin. Mixin lives in GiverPins.lua (loaded first).
+        No <Scripts>: the MapCanvas framework wires OnLoad/OnAcquired from the mixin.
+        Click-through (enableMouse off): Blizzard's own "!" pin on top keeps its tooltip/click.
+    -->
+    <Frame name="VoidQuestGiverPinTemplate" mixin="VoidQuestGiverPinMixin" enableMouse="false" virtual="true">
+        <Size x="16" y="16"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="halo" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+    </Frame>
+</Ui>

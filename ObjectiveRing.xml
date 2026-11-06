@@ -1,0 +1,22 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!--
+        VoidQuest objective ring pin. Mixin lives in ObjectiveRing.lua (loaded first).
+        No <Scripts>: the MapCanvas framework wires OnLoad/OnAcquired from the mixin
+        (declaring them here trips an assert in Blizzard_MapCanvas). Click-through:
+        enableMouse is off so it never blocks Blizzard's quest pins.
+    -->
+    <Frame name="VoidQuestRingPinTemplate" mixin="VoidQuestRingPinMixin" enableMouse="false" virtual="true">
+        <Size x="44" y="44"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="disc" setAllPoints="true"/>
+            </Layer>
+            <Layer level="ARTWORK">
+                <Texture parentKey="dot">
+                    <Size x="7" y="7"/>
+                    <Anchors><Anchor point="CENTER"/></Anchors>
+                </Texture>
+            </Layer>
+        </Layers>
+    </Frame>
+</Ui>

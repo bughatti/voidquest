@@ -1,0 +1,14 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!--
+        VoidQuest (WoW Forever) quest-start pin: a "!" where a quest you can still do starts.
+        Mixin lives in ForeverZone.lua (loaded first). MapCanvas wires OnMouseEnter / OnClick.
+    -->
+    <Frame name="VoidQuestForeverPinTemplate" mixin="VoidQuestForeverPinMixin" enableMouse="true" virtual="true">
+        <Size x="18" y="18"/>
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture parentKey="icon" file="Interface\GossipFrame\AvailableQuestIcon" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+    </Frame>
+</Ui>
