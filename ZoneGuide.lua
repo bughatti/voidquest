@@ -420,9 +420,14 @@ function mod:NearestLogQuest(map, peek)
     local w, h = safe(C_Map.GetMapWorldSize, map)
     if not (w and h and w > 0 and h > 0) then w, h = 1, 1 end
     local dist, first, turnin = {}, nil, nil
+    -- dungeon quests have their own group in the quest lines; outside an instance the guide
+    -- doesn't jump to one just because you walk past its dungeon
+    local G = VQ.Guide
+    local outside = not (IsInInstance and IsInInstance())
     for _, q in ipairs(safe(C_QuestLog.GetQuestsOnMap, map) or {}) do
         local qid = q.questID
-        if qid and inLog(qid) and not safe(C_QuestLog.IsWorldQuest, qid) then
+        if qid and inLog(qid) and not safe(C_QuestLog.IsWorldQuest, qid)
+           and not (outside and G and G.IsDungeonQuest and G:IsDungeonQuest(qid)) then
             if safe(C_QuestLog.IsComplete, qid) then turnin = turnin or qid else first = first or qid end
             if px and q.x and q.y then
                 local dx, dy = (q.x - px) * w, (q.y - py) * h

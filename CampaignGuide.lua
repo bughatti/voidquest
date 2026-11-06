@@ -25,6 +25,11 @@ local function PanelHeight(f, h)
     if InCombatLockdown() and f:IsProtected() then return end
     f:SetHeight(h)
 end
+-- Panel width (drag the corner grip; setting panelWidth) and the content width inside it.
+-- Every row reads CW(), and texts cut to fit scale with it (truncTo).
+local PANEL_W_MIN, PANEL_W_MAX = 260, 640
+local function PW() return math.max(PANEL_W_MIN, math.min(PANEL_W_MAX, VQ:Get("panelWidth") or 300)) end
+local function CW() return PW() - 16 end
 -- Same for Show / Hide (BugGrabber 2026-10-25: Show() blocked in combat). The panel
 -- is already in that state when shown mid-fight; a refresh after combat catches up.
 local function PanelShown(f, on)
@@ -2497,7 +2502,7 @@ local VERB = { pickup = "Pick up", progress = "Complete", turnin = "Turn in" }
 function mod:EnsurePanel()
     if self.frame then return self.frame end
     local f = CreateFrame("Frame", "VoidQuestGuidePanel", UIParent, "BackdropTemplate")
-    f:SetSize(300, 90)
+    f:SetSize(PW(), 90)
     local p = (VoidQuestDB and VoidQuestDB.guidePoint) or { "RIGHT", -24, 120 }
     f:SetPoint(p[1], UIParent, p[1], p[2], p[3])
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
@@ -2508,10 +2513,75 @@ function mod:EnsurePanel()
         VoidQuestDB.guidePoint = { a, x, y }
     end)
     VQ:CreateBackdrop(f, 0.9)
-    f.camp = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.camp, 12, "OUTLINE"); f.camp:SetPoint("TOPLEFT", 12, -9); f.camp:SetWidth(100); f.camp:SetWordWrap(false); f.camp:SetJustifyH("LEFT")
-    f.chapter = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.chapter, 10); f.chapter:SetPoint("TOPLEFT", 12, -27); f.chapter:SetWidth(284); f.chapter:SetWordWrap(false); f.chapter:SetJustifyH("LEFT"); f.chapter:SetTextColor(1, 0.82, 0)
-    f.step = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.step, 12); f.step:SetPoint("TOPLEFT", 12, -44); f.step:SetWidth(284); f.step:SetJustifyH("LEFT")
-    f.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.obj, 10); f.obj:SetPoint("TOPLEFT", f.step, "BOTTOMLEFT", 0, -4); f.obj:SetWidth(284); f.obj:SetJustifyH("LEFT"); f.obj:SetTextColor(0.7, 0.7, 0.7)
+    -- Resize: drag the grip in the bottom-right corner (the player, 2026-11-05: "drag the
+    -- box to make it bigger"). Width and height are saved (panelWidth / panelHeight; the
+    -- height is the panel's fixed size, more room = more quest lines). Not in combat: the
+    -- panel holds a secure quest-item button, so it can't be resized then.
+    f:SetResizable(true)
+    if f.SetResizeBounds then f:SetResizeBounds(PANEL_W_MIN, 120, PANEL_W_MAX, 800) end
+    f.grip = CreateFrame("Button", nil, f)
+    f.grip:SetSize(14, 14); f.grip:SetPoint("BOTTOMRIGHT", -2, 2)
+    f.grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    f.grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    f.grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    f.grip:SetScript("OnMouseDown", function(_, btn)
+        if btn ~= "LeftButton" or InCombatLockdown() or VQ:Get("lockPanel") then return end
+        f._sizing = true
+        f:StartSizing("BOTTOMRIGHT")
+    end)
+    -- Let go: stop, save, redraw. If a fight started mid-drag the panel is protected and
+    -- can't be stopped now -- finish as soon as combat ends.
+    local function finishSizing()
+        if not f._sizing then return end
+        if InCombatLockdown() and f:IsProtected() then
+            f._finishAfterCombat = true
+            f:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
+        f._sizing, f._finishAfterCombat = nil, nil
+        f:StopMovingOrSizing()
+        VoidQuestDB.panelWidth = math.floor(f:GetWidth() + 0.5)
+        VoidQuestDB.panelHeight = math.floor(f:GetHeight() + 0.5)
+        -- keep the panel where it is (StartSizing re-anchors it to its top-left)
+        local a, _, _, x, y = f:GetPoint()
+        VoidQuestDB.guidePoint = { a, x, y }
+        mod:ApplyWidth()
+        mod:Refresh()
+    end
+    f.grip:SetScript("OnMouseUp", finishSizing)
+    f:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" and f._finishAfterCombat then
+            f:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            finishSizing()
+        end
+    end)
+    f.grip:SetScript("OnEnter", function(s)
+        GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Drag to resize")
+        GameTooltip:AddLine("Taller shows more quest lines.", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    f.grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.camp = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.camp, 12, "OUTLINE"); f.camp:SetPoint("TOPLEFT", 12, -9); f.camp:SetWidth(PW() - 200); f.camp:SetWordWrap(false); f.camp:SetJustifyH("LEFT")
+    f.chapter = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.chapter, 10); f.chapter:SetPoint("TOPLEFT", 12, -27); f.chapter:SetWidth(CW()); f.chapter:SetWordWrap(false); f.chapter:SetJustifyH("LEFT"); f.chapter:SetTextColor(1, 0.82, 0)
+    -- Zones | Dungeons tabs, in the chapter line's spot (WoW Forever's zone guide; the
+    -- player, 2026-11-05: "make it a button, next to it put dungeons as a button"). They
+    -- switch the quest lines under the guide; the guide's own step stays.
+    local function makeTab(key)
+        local b = CreateFrame("Button", nil, f)
+        b:SetHeight(14)
+        b.text = b:CreateFontString(nil, "OVERLAY"); VQ:SetFont(b.text, 10, "OUTLINE")
+        b.text:SetPoint("LEFT", 0, 0)
+        b.line = b:CreateTexture(nil, "OVERLAY"); b.line:SetHeight(1)
+        b.line:SetPoint("BOTTOMLEFT", 0, 0); b.line:SetPoint("BOTTOMRIGHT", 0, 0)
+        b.line:SetColorTexture(0, 0.78, 1, 0.9)
+        b:SetScript("OnClick", function() mod:SetQuestTab(key) end)
+        b:Hide()
+        return b
+    end
+    f.tabZones, f.tabDungeons = makeTab("zones"), makeTab("dungeons")
+    f.step = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.step, 12); f.step:SetPoint("TOPLEFT", 12, -44); f.step:SetWidth(CW()); f.step:SetJustifyH("LEFT")
+    f.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.obj, 10); f.obj:SetPoint("TOPLEFT", f.step, "BOTTOMLEFT", 0, -4); f.obj:SetWidth(CW()); f.obj:SetJustifyH("LEFT"); f.obj:SetTextColor(0.7, 0.7, 0.7)
 
     -- Blizzard-tracker show/hide checkbox (far right) + gear + density + quest-line picker
     f.trackerCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
@@ -2648,7 +2718,7 @@ function mod:EnsurePanel()
         end
     end
     local function extraLine(tip, detail, key)
-        local fs = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(fs, 10); fs:SetWidth(284); fs:SetJustifyH("LEFT")
+        local fs = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(fs, 10); fs:SetWidth(CW()); fs:SetJustifyH("LEFT")
         fs:Hide()
         local b = CreateFrame("Button", nil, f)
         b:SetAllPoints(fs)
@@ -2824,7 +2894,11 @@ function mod:CurrentQuests()
     return out, kinds, titles
 end
 
-local function truncTo(s, n) return (#s > n) and (s:sub(1, n - 2) .. "..") or s end
+-- n = characters that fit the default 284 px width; scaled to the panel's width now
+local function truncTo(s, n)
+    n = math.floor(n * CW() / 284)
+    return (#s > n) and (s:sub(1, n - 2) .. "..") or s
+end
 
 -- Quests with a progress-bar objective ("camp invaded 8%", bonus objectives): their
 -- percent, else nil. Blizzard's tracker draws these bars; with it hidden we draw our own.
@@ -2902,6 +2976,38 @@ end
 -- you're doing now), the game shows it on your map, its map is your zone, or it has no
 -- map at all (do-anywhere: "upgrade an item"). Upgrade Practicum, picked up in Silvermoon,
 -- sat behind "+12 more" with a Silvermoon quest tagged [Silvermoon City] (2026-10-27).
+-- A dungeon or raid quest (grouped on its own in the quest lines).
+--   WoW Forever: Blizzard's quest data flags them (ForeverQuests "D" dungeon / "R" raid).
+--   Retail: the quest's tag (Dungeon / Raid / Raid 10 / Raid 25), or its map is an
+--   instance you're not in (InstanceQuest).
+local DUNGEON_TAGS = {}
+do
+    local T = Enum and Enum.QuestTag
+    for _, k in ipairs({ "Dungeon", "Raid", "Raid10", "Raid25" }) do
+        if T and T[k] then DUNGEON_TAGS[T[k]] = true end
+    end
+    if not next(DUNGEON_TAGS) then DUNGEON_TAGS = { [81] = true, [62] = true, [88] = true, [89] = true } end
+end
+function mod:IsDungeonQuest(qid)
+    local fq = VQ.ForeverQuests and VQ.ForeverQuests[qid]
+    if fq then return (fq[6] or ""):find("[DR]") ~= nil end
+    local info = safe(C_QuestLog.GetQuestTagInfo, qid)
+    if info and info.tagID and DUNGEON_TAGS[info.tagID] then return true end
+    return self:InstanceQuest(qid) ~= nil
+end
+
+-- The dungeon a dungeon quest belongs to, for its heading on the Dungeons tab.
+--   WoW Forever: the quest's area in Blizzard's quest data (Ruins of Lordaeron, Wailing
+--   Caverns...), else its group. Retail: the instance its map is in, else its zone.
+function mod:DungeonName(qid)
+    local F = VQ.Forever
+    local info = F and F.Info and F:Info(qid)
+    if info then return info.zone or info.group or "Other dungeons" end
+    local iq = self:InstanceQuest(qid)
+    if iq and iq.name then return iq.name end
+    return (QuestZone(qid)) or "Other dungeons"
+end
+
 function mod:IsLocalQuest(qid, hereZone)
     local t = VoidQuestCharDB and VoidQuestCharDB.acceptedAt and VoidQuestCharDB.acceptedAt[qid]
     if t and time() - t < 900 then return true, true end
@@ -2991,8 +3097,51 @@ function mod:QuestBlockEntries(skip)
         if (da ~= nil) ~= (db ~= nil) then return da ~= nil end
         return a.order < b.order
     end)
+    -- dungeon and raid quests in a group of their own, after this zone's quests (the
+    -- player, 2026-11-05: "separate dungeon quests in a grouping from other quests")
+    local dungeons = {}
+    local function pullDungeons(list)
+        local keep = {}
+        for _, e in ipairs(list) do
+            if e.qid and self:IsDungeonQuest(e.qid) then
+                e.dungeon = true
+                dungeons[#dungeons + 1] = e
+            else
+                keep[#keep + 1] = e
+            end
+        end
+        return keep
+    end
+    inZone = pullDungeons(inZone)
+    others = pullDungeons(others)
+    self._dungeonCount = #dungeons
+    -- Dungeons tab: only dungeon / raid quests, under a heading per dungeon (several
+    -- dungeons' quests at once is common), dungeons A-Z, log order inside each
+    if self._tabMode == "dungeons" then
+        local groups, names = {}, {}
+        for _, e in ipairs(dungeons) do
+            local name = self:DungeonName(e.qid)
+            if not groups[name] then groups[name] = {}; names[#names + 1] = name end
+            e.zone = nil   -- the heading already says where
+            table.insert(groups[name], e)
+        end
+        table.sort(names)
+        local list = {}
+        for _, name in ipairs(names) do
+            list[#list + 1] = { header = ("%s (%d)"):format(name, #groups[name]) }
+            for _, e in ipairs(groups[name]) do list[#list + 1] = e end
+        end
+        if #list == 0 then list[1] = { header = "No dungeon quests in your log" } end
+        return list, {}
+    end
     for _, e in ipairs(area) do out[#out + 1] = e end
     for _, e in ipairs(inZone) do out[#out + 1] = e end
+    -- without tabs (retail, campaigns) dungeons are a group in the same list; on the
+    -- Zones tab they're left out (they have their own tab)
+    if #dungeons > 0 and self._tabMode ~= "zones" then
+        out[#out + 1] = { header = ("Dungeon quests (%d)"):format(#dungeons) }
+        for _, e in ipairs(dungeons) do out[#out + 1] = e end
+    end
     -- other zones fill in only when nothing here needs doing: no zone quest, no in-area
     -- event / task, and the guided quest itself isn't here
     local localWork = #inZone > 0 or #area > 0 or scen or (skip and safe(C_QuestLog.IsOnMap, skip))
@@ -3013,7 +3162,7 @@ local function BlockRow(f, i)
     local row = f.qRows[i]
     if row then return row end
     row = CreateFrame("Button", nil, f)
-    row:SetSize(284, QROW)
+    row:SetSize(CW(), QROW)
     row:RegisterForClicks("LeftButtonUp")
     row.text = row:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.text, 10)
     row.text:SetAllPoints(); row.text:SetJustifyH("LEFT"); row.text:SetWordWrap(false)
@@ -3071,8 +3220,10 @@ local function MoreTip(list)
                 GameTooltip:AddLine("  " .. e.name .. " |cff88ccff[recipe]|r", .9, .9, .9)
             elseif e.coffer then
                 GameTooltip:AddLine(e.text, 1, .82, 0)
+            elseif e.header then
+                -- the group's quests below bring their own "Dungeon quests" heading
             else
-                local z = e.zone or (e.kind and "In this area") or "This zone"
+                local z = (e.dungeon and "Dungeon quests") or e.zone or (e.kind and "In this area") or "This zone"
                 if z ~= lastZone then GameTooltip:AddLine(z, 0, .78, 1); lastZone = z end
                 local done = safe(C_QuestLog.IsComplete, e.qid)
                 GameTooltip:AddLine("  " .. QuestTitle(e) .. (done and " |cff55ff55(turn in)|r" or ""), .9, .9, .9)
@@ -3089,6 +3240,13 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
     local entries, rest = self:QuestBlockEntries(skip)
     local tracked = safe(C_SuperTrack.GetSuperTrackedQuestID)
     fit = math.max(0, fit or 0)
+    -- other zones' quests (held back while this zone has work) still show when there's
+    -- room for all of them -- no "+1 more" over empty space (the player, 2026-11-05)
+    if #rest > 0 and #entries + 1 + #rest <= fit then
+        entries[#entries + 1] = { header = "Other zones" }
+        for _, e in ipairs(rest) do entries[#entries + 1] = e end
+        rest = {}
+    end
     local shown = #entries
     local hidden = {}
     if #entries + #rest > fit then
@@ -3113,6 +3271,10 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             text = e.text
             row.tip = function(s) VQ.Coffer:Tooltip(s) end
             row:SetScript("OnClick", function() VQ.Coffer:Toggle() end)
+        elseif e.header then   -- a group title ("Dungeon quests")
+            text = "|cff88ccff" .. e.header .. "|r"
+            row.tip = nil
+            row:SetScript("OnClick", nil)
         else
             local qid = e.qid
             local mark = (qid == tracked or self:InstancePinUp(qid)) and "|cff55ff55> |r" or ""
@@ -3130,11 +3292,13 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
         used = used + 1
     end
     -- "+N more" (only when there's room for a line at all)
-    if #hidden > 0 and fit > used then
+    local nHidden = 0   -- group titles aren't quests
+    for _, e in ipairs(hidden) do if not e.header then nHidden = nHidden + 1 end end
+    if nHidden > 0 and fit > used then
         used = used + 1
         local row = BlockRow(f, used)
         row.text:SetText(("|cff88ccff+%d more quest%s|r |cff888888- hover to list, click to open|r"):format(
-            #hidden, #hidden == 1 and "" or "s"))
+            nHidden, nHidden == 1 and "" or "s"))
         row.tip = MoreTip(hidden)
         row:SetScript("OnClick", function() mod:ToggleQuestLog() end)
         row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (used - 1) * QROW)
@@ -3151,6 +3315,17 @@ end
 -- Fixed panel height (Settings > Guide panel > Height). The guide grows past it only if
 -- its own lines don't fit; quest lines only fill what's left.
 local function PanelBudget() return VQ:Get("panelHeight") or 230 end
+
+-- How tall the guide's own part is: from the panel's top to the bottom of `below` (the
+-- region the quest lines hang from), plus room at the bottom for the resize grip. Both
+-- are on the same frame, so screen units match. nil when the layout isn't known yet.
+local function MeasuredCore(f, below)
+    local top, bottom = f:GetTop(), below and below:GetBottom()
+    if not (top and bottom) or top <= bottom then return nil end
+    local es = f:GetEffectiveScale() or 1
+    local bs = below.GetEffectiveScale and below:GetEffectiveScale() or es
+    return (top - bottom * bs / es) + 12
+end
 
 -- Click a quest to super-track it (arrow); click the SAME one again to UN-track (clear arrow).
 function mod:ToggleTrack(qid)
@@ -3272,6 +3447,7 @@ function mod:RenderQuestList(f, popH)
     popH = popH or 0
     if f.pbar then f.pbar:Hide() end   -- list mode: bars are per row
     f.chapter:Hide(); f.step:Hide(); f.obj:Hide()
+    f.tabZones:Hide(); f.tabDungeons:Hide(); self._tabMode = nil
     if f.stepBtn then f.stepBtn:Hide() end
     if f.objBtn then f.objBtn:Hide() end
     self:HideQuestBlock(f)
@@ -3299,6 +3475,16 @@ function mod:RenderQuestList(f, popH)
         for _, qid in ipairs(elsewhere) do zoneTag[qid] = (QuestZone(qid)) end
         quests = elsewhere
     end
+    -- dungeon / raid quests grouped at the end, tagged (same grouping as the step mode's lines)
+    local dungeonQ = {}
+    do
+        local normal, dung = {}, {}
+        for _, qid in ipairs(quests) do
+            if self:IsDungeonQuest(qid) then dungeonQ[qid] = true; dung[#dung + 1] = qid else normal[#normal + 1] = qid end
+        end
+        for _, qid in ipairs(dung) do normal[#normal + 1] = qid end
+        quests = normal
+    end
     local room = math.max(1, math.floor((PanelBudget() - 34 - popH) / ROWH)) - (scen and 1 or 0)
     local moreFits = true
     if #quests + #recipes + (#overflow > 0 and 1 or 0) > room then
@@ -3321,18 +3507,18 @@ function mod:RenderQuestList(f, popH)
         local row = f.questRows[1]
         if not row then
             row = {}
-            row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(284, 13)
+            row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(CW(), 13)
             row.btn:RegisterForClicks("LeftButtonUp")
             row.title = row.btn:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.title, 11)
             row.title:SetAllPoints(row.btn); row.title:SetJustifyH("LEFT")
             row.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.obj, 9)
-            row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(280)
+            row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(CW() - 4)
             f.questRows[1] = row
         end
         row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top)
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - 13)
         row.title:SetText("|cffffd200" .. truncTo(scen.name, 36) .. "|r |cff88ccff[event]|r")
-        row.obj:SetText(truncTo(scen.obj, 52)); row.obj:SetWidth(280)
+        row.obj:SetText(truncTo(scen.obj, 52)); row.obj:SetWidth(CW() - 4)
         if row.bar then row.bar:Hide() end
         row.btn:SetScript("OnClick", nil)
         row.btn:Show(); row.obj:Show()
@@ -3342,12 +3528,12 @@ function mod:RenderQuestList(f, popH)
         local row = f.questRows[ri]
         if not row then
             row = {}
-            row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(284, 13)
+            row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(CW(), 13)
             row.btn:RegisterForClicks("LeftButtonUp")
             row.title = row.btn:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.title, 11)
             row.title:SetAllPoints(row.btn); row.title:SetJustifyH("LEFT")
             row.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.obj, 9)
-            row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(280)
+            row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(CW() - 4)
             f.questRows[ri] = row
         end
         row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH)
@@ -3361,6 +3547,7 @@ function mod:RenderQuestList(f, popH)
         end
         title = title or ("quest " .. qid)
         local tag = (kinds[qid] == "wq" and " |cff88ccff[WQ]|r") or (kinds[qid] == "task" and " |cff88ccff[bonus]|r")
+            or (dungeonQ[qid] and " |cff88ccff[dungeon]|r")
             or (zoneTag[qid] and (" |cff888888[%s]|r"):format(zoneTag[qid])) or ""
         local mark = (qid == tracked) and "|cff55ff55> |r" or ""
         row.title:SetText(mark .. (complete and "|cff55ff55" or "|cffffffff") .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
@@ -3377,7 +3564,7 @@ function mod:RenderQuestList(f, popH)
         row.obj:SetText(obj)
         -- progress-bar quests: a small bar at the right end of the objective line
         row.bar = row.bar or MakeProgressBar(f, 80)
-        row.obj:SetWidth(pct and 190 or 280)
+        row.obj:SetWidth(pct and (CW() - 94) or (CW() - 4))   -- room for the 80 px bar
         row.bar:ClearAllPoints(); row.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, top - (ri - 1) * ROWH - 14)
         SetProgress(row.bar, pct)
         row.btn:SetScript("OnClick", function() mod:ToggleTrack(qid); mod:Refresh() end)
@@ -3389,18 +3576,18 @@ function mod:RenderQuestList(f, popH)
         local row = f.questRows[ri]
         if not row then
             row = {}
-            row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(284, 13)
+            row.btn = CreateFrame("Button", nil, f); row.btn:SetSize(CW(), 13)
             row.btn:RegisterForClicks("LeftButtonUp")
             row.title = row.btn:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.title, 11)
             row.title:SetAllPoints(row.btn); row.title:SetJustifyH("LEFT")
             row.obj = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(row.obj, 9)
-            row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(280)
+            row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(CW() - 4)
             f.questRows[ri] = row
         end
         row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH)
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - (ri - 1) * ROWH - 13)
         row.title:SetText("|cffffffff" .. truncTo(rec.name, 34) .. "|r |cff88ccff[recipe]|r")
-        row.obj:SetText(truncTo(rec.obj, 52)); row.obj:SetWidth(280)
+        row.obj:SetText(truncTo(rec.obj, 52)); row.obj:SetWidth(CW() - 4)
         if row.bar then row.bar:Hide() end
         row.btn:SetScript("OnClick", nil)
         row.btn:Show(); row.obj:Show()
@@ -3447,7 +3634,7 @@ function mod:RenderPopups(f)
         local row = f.popupRows[i]
         if not row then
             row = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-            row:SetSize(284, 17)
+            row:SetSize(CW(), 17)
             f.popupRows[i] = row
         end
         row:ClearAllPoints(); row:SetPoint("TOPLEFT", 12, -27 - (i - 1) * ROW)
@@ -3469,11 +3656,44 @@ function mod:RenderPopups(f)
     return #pops * ROW
 end
 
+-- Which quest lines show under the guide when the tabs are up: "zones" or "dungeons"
+-- (per character). Without tabs (retail, campaigns) the lines show both, dungeons grouped.
+function mod:QuestTab() return (VoidQuestCharDB and VoidQuestCharDB.questTab) or "zones" end
+function mod:SetQuestTab(key)
+    VoidQuestCharDB = VoidQuestCharDB or {}
+    VoidQuestCharDB.questTab = key
+    self:Refresh()
+end
+
+-- Tabs up (and the chapter line hidden) or not; labels and the active tab's look.
+function mod:ShowTabs(f, on, popH)
+    f.tabZones:SetShown(on); f.tabDungeons:SetShown(on)
+    f.chapter:SetShown(not on)
+    self._tabMode = on and self:QuestTab() or nil
+    if not on then return end
+    local top = -25 - (popH or 0)
+    f.tabZones:ClearAllPoints(); f.tabZones:SetPoint("TOPLEFT", 12, top)
+    f.tabDungeons:ClearAllPoints(); f.tabDungeons:SetPoint("LEFT", f.tabZones, "RIGHT", 14, 0)
+    self:UpdateTabLabels(f)
+end
+function mod:UpdateTabLabels(f)
+    local n = self._dungeonCount or 0
+    local active = self:QuestTab()
+    for key, b in pairs({ zones = f.tabZones, dungeons = f.tabDungeons }) do
+        local on = key == active
+        local label = key == "zones" and "Zones" or (n > 0 and ("Dungeons (%d)"):format(n) or "Dungeons")
+        b.text:SetText(on and ("|cffffffff" .. label .. "|r") or ("|cff8c8c9e" .. label .. "|r"))
+        b:SetWidth(b.text:GetStringWidth() + 2)
+        b.line:SetShown(on)
+    end
+end
+
 -- Show the single-step (campaign) widgets, hide the quest-list rows, offset below popups.
 function mod:SetStepMode(f, popH)
     popH = popH or 0
     if f.pbar then f.pbar:Hide() end   -- re-shown below for a progress-bar step
     f.chapter:Show(); f.step:Show()
+    f.tabZones:Hide(); f.tabDungeons:Hide(); self._tabMode = nil   -- Refresh decides (ShowTabs)
     if f.stepBtn then f.stepBtn:Show() end
     if f.objBtn then f.objBtn:Show() end
     if f.obj then f.obj:SetShown(VQ:Get("showObjective") ~= false) end
@@ -3487,9 +3707,29 @@ function mod:SetStepMode(f, popH)
     PanelHeight(f, 90 + popH)
 end
 
+-- Width changed (corner grip, or a setting): every line follows. Rows made earlier kept
+-- the width they were created with, so set them all again. Cheap; skipped while resizing
+-- by hand and in combat (the panel is protected then).
+function mod:ApplyWidth()
+    local f = self.frame
+    if not f or f._sizing or (InCombatLockdown() and f:IsProtected()) then return end
+    local pw, cw = PW(), CW()
+    if math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
+    f.camp:SetWidth(pw - 200)
+    for _, fs in ipairs({ f.chapter, f.step, f.obj, f.side, f.meta, f.big }) do if fs then fs:SetWidth(cw) end end
+    for _, row in ipairs(f.qRows or {}) do row:SetWidth(cw) end
+    for _, row in ipairs(f.questRows or {}) do
+        if row.btn then row.btn:SetWidth(cw) end
+        if row.obj then row.obj:SetWidth(cw - 4) end
+    end
+    for _, row in ipairs(f.popupRows or {}) do row:SetWidth(cw) end
+end
+
 function mod:Refresh()
     self._stepQid = nil   -- set again below only when a guided step is shown
     local f = self:EnsurePanel()
+    if f._sizing then return end   -- being resized by hand: redraw once it's let go
+    self:ApplyWidth()
     f.side:Hide(); f.sideBtn:Hide(); self._side = nil   -- re-shown below in step mode
     f.big:Hide(); f.bigBtn:Hide(); self._big = nil
     f.meta:Hide(); f.metaBtn:Hide(); self._meta = nil
@@ -3545,6 +3785,9 @@ function mod:Refresh()
     local g = r.g
     f.camp:SetText("|cff00c7ff" .. (g.campName or "Campaign") .. "|r")
     f.chapter:SetText((self:ArrowOn() and "" or "|cffff5555[arrow off -- world map button]|r ") .. (g.chapter or ""))
+    -- WoW Forever's zone guide: Zones | Dungeons tabs instead of the chapter line
+    -- (an arrow-off warning keeps the chapter line, so it can't go unseen)
+    self:ShowTabs(f, (g.zoneGuide and VQ.Forever and VQ.Forever:Active() and self:ArrowOn()) and true or false, popH)
     f.densityBtn:SetText(DENSITY_SHORT[r.density])
 
     local step = r.primary
@@ -3757,8 +4000,13 @@ function mod:Refresh()
         local bh = f.pbar:IsShown() and 12 or 0
         local core = math.max(90 + popH, 44 + popH + sh + 4 + oh + bh + sideH + 14)
         local budget = PanelBudget()
+        -- measure where the guide's lines really end (the estimate above runs ~90 px high,
+        -- which left a resized panel with empty space AND "+N more", 2026-11-05)
+        local measured = MeasuredCore(f, below)
+        if measured then core = measured end
         local fit = math.floor((budget - core - 6) / QROW)
         local lines = self:RenderQuestBlock(f, below, fit, step.qid)
+        if self._tabMode then self:UpdateTabLabels(f) end   -- the dungeon count is known now
         PanelHeight(f, math.max(budget, core + (lines > 0 and (lines * QROW + 6) or 0)))
 
         local key = (r.isZone and "z:" or "c:") .. step.qid .. ":" .. step.status
@@ -3796,8 +4044,11 @@ function mod:Refresh()
         -- nothing to guide: the free space shows your quests (other zones' too)
         local core = 90 + popH + (f.meta:IsShown() and ((f.meta:GetStringHeight() or 12) + 6) or 0)
         local budget = PanelBudget()
-        local lines = self:RenderQuestBlock(f, (f.meta:IsShown() and f.meta) or (f.obj:IsShown() and f.obj) or f.step,
-            math.floor((budget - core - 6) / QROW), nil)
+        local anchor = (f.meta:IsShown() and f.meta) or (f.obj:IsShown() and f.obj) or f.step
+        local measured = MeasuredCore(f, anchor)
+        if measured then core = measured end
+        local lines = self:RenderQuestBlock(f, anchor, math.floor((budget - core - 6) / QROW), nil)
+        if self._tabMode then self:UpdateTabLabels(f) end
         PanelHeight(f, math.max(budget, core + (lines > 0 and (lines * QROW + 6) or 0)))
     end
     PanelShown(f, true)

@@ -19,6 +19,7 @@ VQ.SettingsDefaults = {
     -- panel
     lockPanel = false, panelScale = 1.0, panelOpacity = 0.9, showObjective = true, showZoneSummary = true,
     panelHeight = 230,   -- fixed guide-panel height; quest lines fill the space the guide leaves
+    panelWidth = 300,    -- guide-panel width (drag the corner grip)
     -- general
     minimapShow = true, announceActions = false, blizzTracker = true,
     share = true,   -- WoW Forever: share quest-giver spots with other VoidQuest players (ForeverShare.lua)
@@ -184,7 +185,7 @@ function mod:EnsurePanel()
     makeCheck(f, x, y, "Lock panel position", "lockPanel"); y = y - 32
     makeSlider(f, x, y, 210, "Scale", "panelScale", 0.7, 1.6, 0.05); y = y - 42
     makeSlider(f, x, y, 210, "Opacity", "panelOpacity", 0.1, 1.0, 0.05); y = y - 42
-    makeSlider(f, x, y, 210, "Height", "panelHeight", 120, 500, 10, true); y = y - 44
+    makeSlider(f, x, y, 210, "Height", "panelHeight", 120, 800, 10, true); y = y - 44
 
     header(f, x, y, "General"); y = y - 24
     makeCheck(f, x, y, "Show minimap button", "minimapShow"); y = y - 24

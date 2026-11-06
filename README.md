@@ -12,7 +12,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Next step, pinned** — the quest to pick up, the objective to finish or the NPC to turn in to, with a map pin and the arrow pointed at it.
 - **Follows the quest nearest to you** — walk toward another quest's area and the panel switches to it. It only switches when another quest is clearly closer, so it doesn't flicker.
 - **Your quests here first** — the lines under the step list the quests in the zone you're in, nearest first. Other zones only show when nothing here needs doing.
-- **Fixed size** — the panel never grows; what doesn't fit becomes "+N more" (hover to list, click to open).
+- **Drag to resize** — pull the corner grip to make the panel bigger or smaller; it fills the space with your quests, and only what doesn't fit becomes "+N more" (hover to list, click to open).
+- **Zones and Dungeons tabs** (WoW Forever) — your zone's quests on one tab, dungeon quests on the other, grouped under each dungeon's name.
 - **Click a line to track that quest** — your choice holds until you reach it or clear it. VoidQuest never takes over an arrow you set yourself.
 
 ### Hands-free (optional)
