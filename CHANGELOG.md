@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.3 (beta)
+
+- **WoW Forever: the players box is right after a /reload.** Players who logged off stay on the sharing channel's list; VoidQuest already left them out once a message to them bounced, but forgot that on every reload, so the count jumped up for a minute. It now remembers.
+
 ## 0.3.2 (beta)
 
 - **A yellow star marks grey quests worth keeping.** When a quest in your log turns grey, a small star in front of its name means it still matters: a dungeon, elite or class quest, a blue or better reward, or a chain that leads to one. No star = safe to abandon. Hover a grey quest to see why. (Replaces the [keep] / [low] tags.)

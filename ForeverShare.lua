@@ -189,13 +189,16 @@ local memberCount
 -- timed-out mark made logged-off players count as online again every 30 min, so the
 -- players box popped up and down (live 11-07). After UNREACH_FOR, X may be picked again,
 -- which is how we find out they're back.
+-- Marks are SAVED (VoidQuestDB.netOffline, set in Share:Init) and timed with time(): kept
+-- only in memory, every /reload counted logged-off members as online again until their
+-- next bounce (live 11-07).
 local UNREACH_FOR = 1800   -- a marked player may be whispered again after this
 local BOUNCE_WAIT = 5      -- the "No player named" line comes back well within this
 local STALE_MARK  = 7200   -- busy channel only: marks older than this stop being counted
-local unreach = {}       -- [lower(name)] = GetTime() of the last bounce
+local unreach = {}       -- [lower(name)] = time() of the last bounce
 local function reachable(name)   -- may be whispered
     local t = unreach[name:lower()]
-    return not t or GetTime() - t >= UNREACH_FOR
+    return not t or time() - t >= UNREACH_FOR
 end
 
 -- The "Players online" box (PresenceBox.lua, shared with VoidGather / VoidSweep).
@@ -204,7 +207,7 @@ local function publish()
     local gone = 0
     if (memberCount or 0) > ROSTER_MAX then
         -- only a window of the list is read: count the recent marks
-        local now = GetTime()
+        local now = time()
         for _, t in pairs(unreach) do if now - t < STALE_MARK then gone = gone + 1 end end
     else
         for _, name in ipairs(roster) do if unreach[name:lower()] then gone = gone + 1 end end
@@ -226,12 +229,24 @@ local function readRoster()
     -- a busy channel: read a random window of ROSTER_MAX members, so everyone can be picked
     local total = count or 0
     local start = total > ROSTER_MAX and math.random(0, total - ROSTER_MAX) or 0
+    local resolved = 0   -- rows that came back with a name (you included)
     for r = start + 1, start + math.min(total, ROSTER_MAX) do
         local ok, name = pcall(C_ChatInfo.GetChannelRosterInfo, i, r)
         name = ok and canon(name)
+        if name then resolved = resolved + 1 end
         if name and name ~= me then list[#list + 1] = name end
     end
-    if #list > 0 or total <= 1 then roster = list end
+    if #list > 0 or total <= 1 then
+        roster = list
+        -- the whole list was read: forget offline marks of players no longer on it (they're
+        -- saved across reloads, so this keeps the saved table small). Only when every row
+        -- had a name: a name still loading isn't "gone" (Sol review)
+        if total <= ROSTER_MAX and resolved == total then
+            local on = {}
+            for _, n in ipairs(list) do on[n:lower()] = true end
+            for k in pairs(unreach) do if not on[k] then unreach[k] = nil end end
+        end
+    end
     publish()
 end
 
@@ -294,8 +309,8 @@ local function pump()
         return
     end
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        local key, at = item.to:lower(), GetTime()
-        whispered[key] = at
+        local key, at = item.to:lower(), time()
+        whispered[key] = GetTime()   -- bounce matching (HIDE_FOR) runs on GetTime
         local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
         -- Enum.SendAddonMessageResult: 0 = Success, 12 = TargetOffline (older clients: nil/true).
         -- Only a send the game accepted can prove a marked player is back.
@@ -670,6 +685,10 @@ local function hideOfflineNotice(_, _, text) return bouncedName(text) ~= nil end
 
 function Share:Init()
     me = canon(GetUnitName and GetUnitName("player") or UnitName("player"))
+    -- offline marks saved per account, so a /reload doesn't count logged-off players
+    VoidQuestDB = VoidQuestDB or {}
+    VoidQuestDB.netOffline = VoidQuestDB.netOffline or {}
+    unreach = VoidQuestDB.netOffline
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     end
@@ -684,7 +703,7 @@ function Share:Init()
     f:SetScript("OnEvent", function(_, event, prefix, msg, channel, sender, _, _, localID)
         if event == "CHAT_MSG_SYSTEM" then   -- our whisper bounced: unreachable for a while
             local name = bouncedName(prefix)  -- arg1 = the message text
-            if name then unreach[name] = GetTime(); publish() end
+            if name then unreach[name] = time(); publish() end
         elseif event == "CHAT_MSG_ADDON" then
             if prefix ~= PREFIX or type(sender) ~= "string" or sender == "" then return end
             -- whispers; or our channel, should Blizzard let channel addon messages through again
