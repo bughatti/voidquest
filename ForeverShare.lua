@@ -184,15 +184,18 @@ local memberCount
 
 -- The member list also holds players who can't be whispered right now (logged off, out of
 -- reach); the game's connected check answers "unknown" for everyone but you (live 11-05).
--- A whisper that bounces ("No player named X is currently playing") marks X unreachable
--- for UNREACH_FOR seconds: not picked, not counted.
-local UNREACH_FOR = 1800
-local unreach = {}       -- [lower(name)] = GetTime()
-local function reachable(name)
+-- A whisper that bounces ("No player named X is currently playing") marks X offline. The
+-- mark stays until a later whisper to X goes through (no bounce within BOUNCE_WAIT): a
+-- timed-out mark made logged-off players count as online again every 30 min, so the
+-- players box popped up and down (live 11-07). After UNREACH_FOR, X may be picked again,
+-- which is how we find out they're back.
+local UNREACH_FOR = 1800   -- a marked player may be whispered again after this
+local BOUNCE_WAIT = 5      -- the "No player named" line comes back well within this
+local STALE_MARK  = 7200   -- busy channel only: marks older than this stop being counted
+local unreach = {}       -- [lower(name)] = GetTime() of the last bounce
+local function reachable(name)   -- may be whispered
     local t = unreach[name:lower()]
-    if t and GetTime() - t < UNREACH_FOR then return false end
-    unreach[name:lower()] = nil
-    return true
+    return not t or GetTime() - t >= UNREACH_FOR
 end
 
 -- The "Players online" box (PresenceBox.lua, shared with VoidGather / VoidSweep).
@@ -200,10 +203,11 @@ local function publish()
     if not _G.VoidPresence then return end
     local gone = 0
     if (memberCount or 0) > ROSTER_MAX then
-        -- only a window of the list is read: count every name still marked unreachable
-        for name in pairs(unreach) do if not reachable(name) then gone = gone + 1 end end
+        -- only a window of the list is read: count the recent marks
+        local now = GetTime()
+        for _, t in pairs(unreach) do if now - t < STALE_MARK then gone = gone + 1 end end
     else
-        for _, name in ipairs(roster) do if not reachable(name) then gone = gone + 1 end end
+        for _, name in ipairs(roster) do if unreach[name:lower()] then gone = gone + 1 end end
     end
     local others = memberCount and math.max(0, memberCount - 1 - gone)
     VoidPresence:Set("VoidQuest", "VoidQuest online", others or 0, false, enabled() and others ~= nil)
@@ -214,7 +218,10 @@ local function readRoster()
     if not (i and C_ChatInfo and C_ChatInfo.GetChannelRosterInfo) then return end
     local _, _, _, _, count = GetChannelDisplayInfo(i)
     count = tonumber(count)
-    if count and count > 0 then memberCount = count end
+    -- no count = another channel holds the selection (only the selected one has a list,
+    -- live 11-07): keep what we had, never wipe the roster on an empty read
+    if not count or count < 1 then return end
+    memberCount = count
     local list = {}
     -- a busy channel: read a random window of ROSTER_MAX members, so everyone can be picked
     local total = count or 0
@@ -228,19 +235,40 @@ local function readRoster()
     publish()
 end
 
+-- Only ONE channel can be selected at a time, and only the selected one has a member list.
+-- VoidGather / VoidSweep (WhisperNet.lua Net.Turn) ask at the same moments, so everyone
+-- takes turns through the global VoidRosterTurnUntil: whoever selects holds it TURN_HOLD
+-- seconds (covers the ~3 s wait for the list), the rest wait for it to run out.
+local TURN_HOLD = 4
+local function takeTurn(fn)
+    local now, busy = GetTime(), _G.VoidRosterTurnUntil or 0
+    if now >= busy then
+        _G.VoidRosterTurnUntil = now + TURN_HOLD
+        fn()
+    else
+        C_Timer.After(busy - now + 0.1 + math.random() * 0.5, function() takeTurn(fn) end)
+    end
+end
+
 -- The server sends the member list after the channel is selected (CHANNEL_ROSTER_UPDATE).
 -- Left alone while the Channels window is open, so we never change what you're looking at.
+local waitingTurn
 local function requestRoster()
-    if GetTime() - rosterAt < ROSTER_EVERY then return end
-    local i = displayIndex()
-    if not i then return end   -- not in the channel yet: try again next time
-    -- the wait only starts once the list was really asked for (not while the window is open)
-    if not (ChannelFrame and ChannelFrame:IsShown()) and SetSelectedDisplayChannel then
-        rosterAt = GetTime()
-        pcall(SetSelectedDisplayChannel, i)
-    end
-    readRoster()   -- may already be there
-    C_Timer.After(3, readRoster)   -- else it arrives within a few seconds (live 11-05: ~3 s)
+    if waitingTurn or GetTime() - rosterAt < ROSTER_EVERY then return end
+    if not displayIndex() then return end   -- not in the channel yet: try again next time
+    waitingTurn = true
+    takeTurn(function()
+        waitingTurn = nil
+        local i = displayIndex()
+        if not i then return end
+        -- the wait only starts once the list was really asked for (not while the window is open)
+        if not (ChannelFrame and ChannelFrame:IsShown()) and SetSelectedDisplayChannel then
+            rosterAt = GetTime()
+            pcall(SetSelectedDisplayChannel, i)
+        end
+        readRoster()   -- may already be there
+        C_Timer.After(3, readRoster)   -- else it arrives within a few seconds (live 11-05: ~3 s)
+    end)
 end
 
 -- Up to k random members we can reach.
@@ -266,8 +294,20 @@ local function pump()
         return
     end
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        whispered[item.to:lower()] = GetTime()
-        C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
+        local key, at = item.to:lower(), GetTime()
+        whispered[key] = at
+        local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
+        -- Enum.SendAddonMessageResult: 0 = Success, 12 = TargetOffline (older clients: nil/true).
+        -- Only a send the game accepted can prove a marked player is back.
+        if result == 12 then
+            unreach[key] = at; publish()
+        elseif (result == nil or result == true or result == 0) and unreach[key] then
+            -- a marked player we whispered again: no bounce = they're back online
+            C_Timer.After(BOUNCE_WAIT, function()
+                local t = unreach[key]
+                if t and t < at then unreach[key] = nil; publish() end
+            end)
+        end
     end
 end
 
