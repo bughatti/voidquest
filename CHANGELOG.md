@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.2.4 (beta)
+
+- **Quest item buttons for every quest, near the quest.** Each quest item gets its own button beside the panel (up to 6), shown only while you're near that quest (within about 1,000 yards, or in its zone when the game doesn't know where it is), with the closest on top. Before, one button stuck to a single quest's item, even a continent away.
+- **WoW Forever: items from your bags.** Most Classic quests never tell the game which item is theirs (a flare gun to fire, a totem to place), so there was no button. VoidQuest now learns the item a quest hands you when you accept it, and otherwise matches an item the quest's text names. `/vq items` lists what it found.
+- **Dungeons: the dungeon's quests first.** Inside Wailing Caverns the lines listed your Barrens quests and hid the dungeon's own behind "+8 more". Inside a dungeon or raid, its quests now lead and outdoor quests wait under "+N more".
+
 ## 0.2.3 (beta)
 
 - **Quest lines are coloured by level**, like the quest log: gray (far below you), green, yellow (your level), orange, red (too high for now). Hover a line for its level.

@@ -18,6 +18,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Hover to read, right-click to open** — hovering a quest line shows what to do and the start of its story; right-click opens the whole quest in your quest log.
 - **Coloured by level** — quest lines use the quest log's colours: gray (far below you), green, yellow (your level), orange, red (too high for now).
 - **Who in your group is on it** — a small blue badge at the right of a line counts the group members on that quest too; hover for their names.
+- **Quest items, one click** — when a quest needs you to use an item ("fire the flare gun", "use the totem"), its button sits beside the panel while you're near that quest, closest quest on top, and goes away when you leave. On WoW Forever most quests never tell the game which item is theirs, so VoidQuest works it out: the item a quest hands you when you accept it, else an item the quest's text names. `/vq items` shows what it found.
+- **In a dungeon, its quests first** — inside a dungeon or raid the lines list that dungeon's quests; your outdoor quests wait under "+N more".
 
 ### Quest rewards
 - **Upgrade or gold** — when a quest lets you choose, a green arrow marks the reward that's an upgrade for you (stat-based with VoidGear, otherwise item level) and a gold coin marks the one worth the most gold. Hover a reward for why. You still pick.
@@ -59,6 +61,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 | `/vq arrow` | Arrow on / off |
 | `/vq box` | Show or hide the players online box |
 | `/vq rewards` | Reward advice on quest choices on / off |
+| `/vq items` | List the quest items VoidQuest found, which quest each is for, how far, and whether it's showing |
 | `/vq share` | WoW Forever: sharing quest givers on / off |
 | `/vq net` | WoW Forever: check that sharing gets through |
 | `/vq reset` | Put the panel back in the middle of the screen |

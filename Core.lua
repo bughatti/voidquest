@@ -163,6 +163,8 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         VQ.Share:SelfTest()
     elseif msg == "rewards" and _G.VoidQuestRewardAdvice then   -- marks on quest reward choices
         VoidQuestRewardAdvice.Toggle()
+    elseif msg == "items" and VoidQuest.QuestItemDebug then   -- what the quest item buttons see
+        VoidQuest.QuestItemDebug()
     elseif msg == "box" and _G.VoidPresence then   -- the "Players online" box (shared with VoidGather / VoidSweep)
         VoidPresence:SetShown(not VoidPresence:IsShown())
     elseif msg == "arrow" then

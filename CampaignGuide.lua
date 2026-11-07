@@ -3008,9 +3008,34 @@ function mod:DungeonName(qid)
     return (QuestZone(qid)) or "Other dungeons"
 end
 
+-- In a dungeon or raid (not delves / scenarios: their quests live on the map outside).
+local function InDungeon()
+    local inInst, t = IsInInstance()
+    return inInst and (t == "party" or t == "raid")
+end
+mod.InDungeon = InDungeon
+
+-- Inside a dungeon: does this quest belong to it? Matched by the dungeon's NAME, not the
+-- dungeon flag: Forever's quest data puts every Wailing Caverns quest in "Wailing Caverns",
+-- but Waking Naralex is typed "Elite", not "Dungeon".
+function mod:IsThisInstanceQuest(qid)
+    local name = GetInstanceInfo and GetInstanceInfo()
+    if type(name) ~= "string" or name == "" or not qid then return false end
+    return self:DungeonName(qid) == name
+end
+
 function mod:IsLocalQuest(qid, hereZone)
     local t = VoidQuestCharDB and VoidQuestCharDB.acceptedAt and VoidQuestCharDB.acceptedAt[qid]
-    if t and time() - t < 900 then return true, true end
+    local fresh = t and time() - t < 900
+    -- in a dungeon "here" is the dungeon: Wailing Caverns sits in the Barrens map, and the
+    -- Barrens quests filled the list while the dungeon's own went behind "+8 more"
+    -- (the user, 2026-11-06). Checked before "just picked up", or Barrens quests taken
+    -- on the way in jump the dungeon's (Codex review).
+    if InDungeon() then
+        local mine = self:IsThisInstanceQuest(qid)
+        return mine, mine and fresh or nil
+    end
+    if fresh then return true, true end
     if safe(C_QuestLog.IsOnMap, qid) then return true end
     local _, zmap = QuestZone(qid)
     if not zmap or zmap == 0 then return true end
@@ -3100,12 +3125,17 @@ function mod:QuestBlockEntries(skip)
     -- dungeon and raid quests in a group of their own, after this zone's quests (the
     -- player, 2026-11-05: "separate dungeon quests in a grouping from other quests")
     local dungeons = {}
+    local inDungeon, hereInst = InDungeon(), 0
     local function pullDungeons(list)
         local keep = {}
         for _, e in ipairs(list) do
-            if e.qid and self:IsDungeonQuest(e.qid) then
+            local mine = inDungeon and e.qid and self:IsThisInstanceQuest(e.qid)
+            if mine then hereInst = hereInst + 1 end
+            if e.qid and (mine or self:IsDungeonQuest(e.qid)) then
                 e.dungeon = true
                 dungeons[#dungeons + 1] = e
+                -- inside it, its quests are this zone's on the Zones tab too
+                if mine and self._tabMode == "zones" then keep[#keep + 1] = e end
             else
                 keep[#keep + 1] = e
             end
@@ -3144,7 +3174,7 @@ function mod:QuestBlockEntries(skip)
     end
     -- other zones fill in only when nothing here needs doing: no zone quest, no in-area
     -- event / task, and the guided quest itself isn't here
-    local localWork = #inZone > 0 or #area > 0 or scen or (skip and safe(C_QuestLog.IsOnMap, skip))
+    local localWork = #inZone > 0 or #area > 0 or scen or hereInst > 0 or (skip and safe(C_QuestLog.IsOnMap, skip))
     if not localWork then
         for _, e in ipairs(others) do out[#out + 1] = e end
     else
@@ -3588,9 +3618,12 @@ function mod:RenderQuestList(f, popH)
         for _, qid in ipairs(elsewhere) do zoneTag[qid] = (QuestZone(qid)) end
         quests = elsewhere
     end
-    -- dungeon / raid quests grouped at the end, tagged (same grouping as the step mode's lines)
+    -- dungeon / raid quests grouped at the end, tagged (same grouping as the step mode's lines);
+    -- inside a dungeon its own quests ARE the local list, so they stay on top
     local dungeonQ = {}
-    do
+    if InDungeon() then
+        for _, qid in ipairs(quests) do if self:IsDungeonQuest(qid) or self:IsThisInstanceQuest(qid) then dungeonQ[qid] = true end end
+    else
         local normal, dung = {}, {}
         for _, qid in ipairs(quests) do
             if self:IsDungeonQuest(qid) then dungeonQ[qid] = true; dung[#dung + 1] = qid else normal[#normal + 1] = qid end
