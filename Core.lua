@@ -167,6 +167,10 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         VoidQuest.QuestItemDebug()
     elseif msg == "leftovers" and VoidQuest.LeftoversList then   -- quest items nothing needs anymore
         VoidQuest.LeftoversList()
+    elseif msg == "drops" and VoidQuest.Drops then   -- where your quests' items have come from
+        VoidQuest.Drops:List()
+    elseif msg == "chains" and VoidQuest.Chains then   -- grey quests: keep or low value
+        VoidQuest.Chains:List()
     elseif msg == "box" and _G.VoidPresence then   -- the "Players online" box (shared with VoidGather / VoidSweep)
         VoidPresence:SetShown(not VoidPresence:IsShown())
     elseif msg == "arrow" then

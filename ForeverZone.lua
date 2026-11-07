@@ -227,7 +227,11 @@ local function Tooltip(owner, id, anchor)
         if seen then GameTooltip:AddLine(("Offered to a level %d character"):format(seen), 0.7, 0.7, 0.7) end
     end
     if info.xp and info.xp > 0 then GameTooltip:AddLine(("%d XP"):format(info.xp), 1, 1, 1) end
-    if info.money and info.money > 0 then GameTooltip:AddLine(GetCoinTextureString(info.money), 1, 1, 1) end
+    if info.money and info.money > 0 then
+        -- the global GetCoinTextureString doesn't exist on WoW Forever (C_CurrencyInfo has it)
+        local coin = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or _G.GetCoinTextureString
+        GameTooltip:AddLine(coin and coin(info.money) or GetMoneyString(info.money), 1, 1, 1)
+    end
     if info.rewards and info.rewards ~= "" then GameTooltip:AddLine(info.rewards, 0.8, 0.8, 0.8, true) end
     local giver = VQ.Starts and VQ.Starts:Giver(id)
     if giver then GameTooltip:AddLine("Given by " .. giver, 0.6, 1, 0.6) end

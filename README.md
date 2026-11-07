@@ -24,6 +24,13 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 ### Leftover quest items
 - **What you can throw away** — quest items often stay in your bags after the quest. VoidQuest checks each one: still needed by a quest in your log (or it starts a quest you haven't done), **safe to destroy** (every quest it was tied to is turned in, and none can be done again), or **probably not needed** (nothing in your log needs it, but some quests use an item before you have them). The reason is in the item's tooltip; `/vq leftovers` lists them. With **VoidBags**, leftovers get a red X or a yellow ? in your bags. Nothing is ever destroyed for you.
 
+### Grey quests: keep or drop
+- **[keep] or [low] on grey quest lines** — a grey quest is marked **keep** when it still matters: a dungeon, raid, elite or class quest, a blue or better reward, or a chain that leads to one ("probably leads to Leaders of the Fang (dungeon quest)"). Otherwise it's **low value**, safe to abandon if you need the room. Hover the line for why; `/vq chains` lists them. Nothing is ever abandoned for you.
+- **Quest chains are learned** (WoW Forever): Blizzard keeps Classic quest chains on its servers, so VoidQuest learns them as you play: turn a quest in and the next one the NPC offers is its follow-up. Every update ships the chains found so far.
+
+### Where quest items come from
+- **The quest line's tooltip names the source** — "Plainstrider Kidney: from Greater Plainstrider (12)", learned from what you loot. `/vq drops` lists it. Nothing is drawn on your map.
+
 ### Quest rewards
 - **Upgrade or gold** — when a quest lets you choose, a green arrow marks the reward that's an upgrade for you (stat-based with VoidGear, otherwise item level) and a gold coin marks the one worth the most gold. Hover a reward for why. You still pick.
 
@@ -66,6 +73,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 | `/vq rewards` | Reward advice on quest choices on / off |
 | `/vq items` | List the quest items VoidQuest found, which quest each is for, how far, and whether it's showing |
 | `/vq leftovers` | List quest items in your bags that nothing needs anymore, and why |
+| `/vq chains` | Grey quests in your log: keep or low value, and why |
+| `/vq drops` | Where your quests' items have come from (mobs and objects you looted) |
 | `/vq share` | WoW Forever: sharing quest givers on / off |
 | `/vq net` | WoW Forever: check that sharing gets through |
 | `/vq reset` | Put the panel back in the middle of the screen |

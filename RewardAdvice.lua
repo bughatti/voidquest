@@ -20,7 +20,8 @@ end
 
 local function Money(c)
     if VoidUI and VoidUI.FormatMoney then return VoidUI:FormatMoney(c) end
-    return GetCoinTextureString and GetCoinTextureString(c) or tostring(c)
+    local coin = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or _G.GetCoinTextureString
+    return coin and coin(c) or (GetMoneyString and GetMoneyString(c)) or tostring(c)
 end
 
 -- Equipment slots each kind of item can go in, for this character and client.

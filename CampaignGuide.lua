@@ -3368,6 +3368,10 @@ local function QuestTipWithGroup(qid, zone, groupNames)
         if groupNames then
             GameTooltip:AddLine("In your group on this quest: " .. groupNames, .53, .8, 1, true)
         end
+        -- where its items come from, as you've looted them (Drops.lua)
+        if VQ.Drops then VQ.Drops:AddQuestLines(GameTooltip, qid) end
+        -- grey quests: worth keeping, or low value (Chains.lua)
+        if VQ.Chains then VQ.Chains:AddTooltip(GameTooltip, qid) end
         GameTooltip:Show()   -- resize for the added lines
     end
 end
@@ -3416,6 +3420,8 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             local mark = (qid == tracked or self:InstancePinUp(qid)) and "|cff55ff55> |r" or ""
             local tag = (e.kind == "wq" and " |cff88ccff[WQ]|r") or (e.kind == "task" and " |cff88ccff[bonus]|r")
                 or (e.zone and (" |cff888888[%s]|r"):format(e.zone)) or ""
+            -- grey quests: keep (it matters / leads somewhere) or low value (Chains.lua)
+            if VQ.Chains and not e.kind then tag = VQ.Chains:Tag(qid) .. tag end
             local sum = ObjSummary(qid)
             text = ("%s|cff%s%s|r%s%s"):format(mark, (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
                 sum ~= "" and ("|cffaaaaaa: %s|r"):format(sum) or "")
@@ -3696,6 +3702,7 @@ function mod:RenderQuestList(f, popH)
         local tag = (kinds[qid] == "wq" and " |cff88ccff[WQ]|r") or (kinds[qid] == "task" and " |cff88ccff[bonus]|r")
             or (dungeonQ[qid] and " |cff88ccff[dungeon]|r")
             or (zoneTag[qid] and (" |cff888888[%s]|r"):format(zoneTag[qid])) or ""
+        if VQ.Chains and not kinds[qid] then tag = VQ.Chains:Tag(qid) .. tag end   -- grey: keep / low value
         local mark = (qid == tracked) and "|cff55ff55> |r" or ""
         row.title:SetText(mark .. "|cff" .. (LevelColor(qid)) .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
         local obj = ""

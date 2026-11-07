@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.2.6 (beta)
+
+- **Grey quests: keep or drop.** Grey quest lines are marked **[keep]** when they still matter (a dungeon, raid, elite or class quest, a blue reward, or a chain leading to one) or **[low]** when they're safe to abandon. Hover for why; `/vq chains` lists them.
+- **WoW Forever: quest chains.** Blizzard doesn't give addons Classic quest chains, so VoidQuest learns them as you play: turn a quest in and the next one the NPC offers is its follow-up. This update ships 78 chain links already found.
+- **Where quest items come from.** The quest line's tooltip names the mob or object your quest item drops from, learned from what you loot. `/vq drops` lists it. Nothing is drawn on your map.
+- **WoW Forever: 176 known quest givers** (was 148).
+- **Fixed:** hovering a quest with a money reward in the Forever zone list caused an error. Sharing no longer breaks while the game's chat lockdown is on (encounters), and joining the sharing channel waits until it's allowed.
+
 ## 0.2.5 (beta)
 
 - **Leftover quest items.** Quest items often stay in your bags after the quest, and it's hard to tell what you can throw away. VoidQuest now checks each one: still needed (by a quest in your log, or it starts a quest you haven't done), **safe to destroy** (every quest it was tied to is turned in and can't be done again), or **probably not needed** (nothing in your log needs it, but it can't be sure what it was for). The reason shows in the item's tooltip, and `/vq leftovers` lists them. With VoidBags 1.2.28 they're marked in your bags. Nothing is ever destroyed for you.

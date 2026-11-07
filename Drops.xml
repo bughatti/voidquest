@@ -1,0 +1,15 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!--
+        VoidQuest quest-item drop dot (where you looted a quest item). Mixin lives in
+        Drops.lua (loaded first). The MapCanvas framework wires OnLoad / OnAcquired /
+        OnMouseEnter / OnMouseLeave from the mixin. Mouse on: hover for the item and quest.
+    -->
+    <Frame name="VoidQuestDropPinTemplate" mixin="VoidQuestDropPinMixin" enableMouse="true" virtual="true">
+        <Size x="10" y="10"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="dot" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+    </Frame>
+</Ui>

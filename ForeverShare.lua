@@ -523,9 +523,36 @@ end
 ----------------------------------------------------------------------
 -- Channel join (member list only) + zone catch-up
 ----------------------------------------------------------------------
+-- Joining is blocked in combat and during the chat lockdown (encounters): wait, then retry.
+local function chatLocked()
+    if InCombatLockdown() then return true end
+    local f = C_ChatInfo and C_ChatInfo.InChatMessagingLockdown
+    if not f then return false end
+    local ok, v = pcall(f)
+    if not ok then return true end
+    if issecretvalue and issecretvalue(v) then return true end
+    return v == true
+end
+local joinRetry = CreateFrame("Frame")
+joinRetry:SetScript("OnEvent", function(self)
+    if chatLocked() then return end
+    self:UnregisterAllEvents()
+    Share:JoinNet()
+end)
+
 function Share:JoinNet()
     if not enabled() then return end
-    if not netIndex() then JoinTemporaryChannel(CHANNEL_NAME) end
+    if not netIndex() then
+        if chatLocked() then
+            joinRetry:RegisterEvent("PLAYER_REGEN_ENABLED")
+            joinRetry:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+            joinRetry:RegisterEvent("ENCOUNTER_END")
+            -- fires when a chat / addon restriction lifts (PvP match end, ...): Codex review
+            pcall(joinRetry.RegisterEvent, joinRetry, "ADDON_RESTRICTION_STATE_CHANGED")
+            return
+        end
+        JoinTemporaryChannel(CHANNEL_NAME)
+    end
     if netIndex() and ChatFrame_RemoveChannel then   -- keep it out of the chat tabs
         for i = 1, (NUM_CHAT_WINDOWS or 10) do
             local cf = _G["ChatFrame" .. i]
@@ -580,7 +607,8 @@ end
 -- "No player named X is currently playing." Hide that line for names we just whispered.
 -- That line for a name we whispered in the last 30 s: returns the name (lowercased).
 local function bouncedName(text)
-    if type(text) ~= "string" or not ERR_CHAT_PLAYER_NOT_FOUND_S then return nil end
+    -- system lines can arrive as secret text (chat lockdown): never index those
+    if type(text) ~= "string" or (issecretvalue and issecretvalue(text)) or not ERR_CHAT_PLAYER_NOT_FOUND_S then return nil end
     for name, t in pairs(whispered) do
         if GetTime() - t < 30 and text:lower() == ERR_CHAT_PLAYER_NOT_FOUND_S:format(name):lower() then
             return name
