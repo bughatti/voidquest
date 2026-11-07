@@ -97,7 +97,21 @@ end
 --   red:     its level is 5+ above yours (the game colours it red: too hard anyway).
 -- Returns available, reason ("" when available).
 local RED = 5
+
+-- Grey (low-level) quests: Blizzard hides their "!" unless Low-Level Quests is on (map
+-- Filter, or minimap tracking), and so do we, for the map pins and the guide's pick-up
+-- step (the user, 2026-11-07: Derek Swiftdigger had a pin but no "!" in the world).
+local function lowLevelHidden(id)
+    if C_Minimap and C_Minimap.IsTrackingHiddenQuests and safe(C_Minimap.IsTrackingHiddenQuests) then return false end
+    local t = safe(C_QuestLog.IsQuestTrivial, id)
+    if t == nil or Secret(t) then return false end
+    return t and true or false
+end
+
 function F:Available(id)
+    if lowLevelHidden(id) then
+        return false, "Low level: Blizzard hides these (map Filter > Low-Level Quests shows them)"
+    end
     local lvl = UnitLevel("player") or 0
     local b = VoidQuestCharDB and VoidQuestCharDB.blocked and VoidQuestCharDB.blocked[id]
     if b and lvl <= b then return false, "Not offered to you yet (level or an earlier quest first)" end
@@ -428,7 +442,8 @@ end
 ----------------------------------------------------------------------
 local ev = CreateFrame("Frame")
 for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_REGEN_ENABLED", "ZONE_CHANGED_NEW_AREA", "QUEST_ACCEPTED",
-    "QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_DATA_LOAD_RESULT" }) do
+    "QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_DATA_LOAD_RESULT",
+    "MINIMAP_UPDATE_TRACKING", "CVAR_UPDATE", "PLAYER_LEVEL_UP" }) do   -- Low-Level Quests on / off; quests turn grey
     pcall(ev.RegisterEvent, ev, e)
 end
 -- Redraw the window and map pins, once per burst (many QUEST_DATA_LOAD_RESULTs arrive
@@ -444,8 +459,9 @@ function F:Refresh()
     end)
 end
 
-ev:SetScript("OnEvent", function(_, e)
+ev:SetScript("OnEvent", function(_, e, arg)
     if not F:Active() then ev:UnregisterAllEvents(); return end
+    if e == "CVAR_UPDATE" and arg ~= "trivialQuests" then return end
     if e == "PLAYER_LOGIN" then
         if WorldMapFrame and not F.provider then
             F.provider = CreateFromMixins(VoidQuestForeverProviderMixin)

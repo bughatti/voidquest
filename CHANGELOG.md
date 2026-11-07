@@ -1,5 +1,12 @@
 # VoidQuest Changelog
 
+## 0.3.4 (beta)
+
+- **Share quests quicker.** In a group, a **Share** button in the panel offers your group every quest you have that someone in it doesn't; alt-click a quest line to share just that one.
+- **The whole quest text in the tooltip.** Hovering a quest line showed only the start of its story; it now shows all of it.
+- **Right-click a quest line** opens it in VoidMap's quest page when VoidMap is installed.
+- **WoW Forever: grey quests follow Blizzard.** A low-level quest no longer gets a "!" on the map (or becomes the guide's next pick-up) unless Low-Level Quests is on in the map's Filter, the same as the "!" over the quest giver's head. Before, a giver like Derek Swiftdigger had a pin but nothing over his head.
+
 ## 0.3.3 (beta)
 
 - **WoW Forever: the players box is right after a /reload.** Players who logged off stay on the sharing channel's list; VoidQuest already left them out once a message to them bounced, but forgot that on every reload, so the count jumped up for a minute. It now remembers.

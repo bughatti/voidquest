@@ -2681,6 +2681,30 @@ function mod:EnsurePanel()
         end)
     end
 
+    -- in a group: Share = offer every quest someone in the group doesn't have (alt-click a
+    -- quest line for just that one). The title gives up the room while it shows.
+    f.shareBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.shareBtn:SetSize(46, 18); f.shareBtn:SetPoint("TOPRIGHT", f.zoneBtn, "TOPLEFT", -3, 0)
+    f.shareBtn:SetText("Share")
+    f.shareBtn:SetScript("OnClick", function() mod:ShareMissing() end)
+    f.shareBtn:SetScript("OnEnter", function(s)
+        GameTooltip:SetOwner(s, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Share quests")
+        GameTooltip:AddLine("Offers your group every quest you have that someone in it doesn't. Alt-click a quest line to share just that one.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f.shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local function shareShown()
+        local on = IsInGroup and IsInGroup() or false
+        f.shareBtn:SetShown(on)
+        f.camp:SetWidth(PW() - (on and 250 or 200))
+    end
+    local gev = CreateFrame("Frame")
+    gev:RegisterEvent("GROUP_ROSTER_UPDATE")
+    gev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    gev:SetScript("OnEvent", shareShown)
+    shareShown()
+
     -- click the STEP or OBJECTIVE line to (re)pin its waypoint -- "take me there"
     local function pinClick()
         mod:TakeTrack(); mod._sidePin = nil
@@ -3229,6 +3253,9 @@ end
 -- Right-click a quest line: its full page in Blizzard's quest log (left-click tracks it).
 local function OpenQuestDetails(qid)
     if not qid then return end
+    -- VoidMap's own quest page when it's installed (no Blizzard quest-log calls from addon
+    -- code, which can taint the objective tracker's quest-item buttons)
+    if VoidMap and VoidMap.ShowQuest and VoidMap.ShowQuest(qid) then return end
     if QuestMapFrame_OpenToQuestDetails then
         if pcall(QuestMapFrame_OpenToQuestDetails, qid) then return end
     end
@@ -3236,9 +3263,9 @@ local function OpenQuestDetails(qid)
 end
 mod.OpenQuestDetails = OpenQuestDetails
 
--- The quest's own words for the hover: "what to do" (the log's short text) and the start of
--- its story, cut so the tooltip stays readable (the whole page is a right-click away).
-local STORY_MAX = 320
+-- The quest's own words for the hover: "what to do" (the log's short text) and its story.
+-- Whole (the user, 2026-11-07: the cut-off text left out wording); only a runaway text is cut.
+local STORY_MAX = 3000
 local function Secret(v) return issecretvalue and issecretvalue(v) end
 local function QuestText(qid)
     local idx = safe(C_QuestLog.GetLogIndexForQuestID, qid)
@@ -3276,6 +3303,7 @@ local function QuestTip(qid, zone)
         end
         GameTooltip:AddLine("Left-click: track it (arrow); again to stop.", .6, .6, .6)
         GameTooltip:AddLine("Right-click: open the whole quest.", .6, .6, .6)
+        if IsInGroup and IsInGroup() then GameTooltip:AddLine("Alt-click: share it with your group.", .6, .6, .6) end
         GameTooltip:Show()
     end
 end
@@ -3339,6 +3367,66 @@ local function GroupOnQuest(qid)
         end
     end
     return #names, (#names > 0) and table.concat(names, ", ") or nil
+end
+
+-- Sharing (the user, 2026-11-07: "a quicker way from voidquest to share quests"):
+--   alt-click a quest line = offer it to your group
+--   the header's Share button = offer every quest someone in the group doesn't have,
+--   one every 0.6 s (the game drops pushes sent all at once)
+local function Shareable(qid)
+    if not (qid and IsInGroup and IsInGroup()) then return false end
+    if C_QuestLog.IsPushableQuest then
+        local ok, p = pcall(C_QuestLog.IsPushableQuest, qid)
+        if not ok or not p or (issecretvalue and issecretvalue(p)) then return false end
+    end
+    return true
+end
+
+local function ShareQuest(qid, quiet)
+    if InCombatLockdown() then   -- the game refuses quest sharing in combat
+        if not quiet then VQ:Print("You can share quests after the fight.") end
+        return false
+    end
+    if not (IsInGroup and IsInGroup()) then
+        if not quiet then VQ:Print("Join a group first to share quests.") end
+        return false
+    end
+    if not Shareable(qid) then
+        if not quiet then VQ:Print("That quest can't be shared.") end
+        return false
+    end
+    local idx = safe(C_QuestLog.GetLogIndexForQuestID, qid)
+    if not (idx and QuestLogPushQuest) then return false end
+    QuestLogPushQuest(idx)
+    return true
+end
+mod.ShareQuest = ShareQuest
+
+function mod:ShareMissing()
+    if not (IsInGroup and IsInGroup()) then VQ:Print("Join a group first to share quests."); return end
+    local others = math.max(0, (GetNumGroupMembers() or 1) - 1)
+    local queue = {}
+    for i = 1, (C_QuestLog.GetNumQuestLogEntries() or 0) do
+        local info = safe(C_QuestLog.GetInfo, i)
+        if info and not info.isHeader and not info.isHidden and info.questID and Shareable(info.questID) then
+            local have = GroupOnQuest(info.questID)
+            if have < others then queue[#queue + 1] = info.questID end
+        end
+    end
+    if #queue == 0 then VQ:Print("Your group already has all your shareable quests."); return end
+    if InCombatLockdown() then VQ:Print("You can share quests after the fight."); return end
+    mod._shareStopped = nil
+    VQ:Print(("Sharing %d quest%s with your group."):format(#queue, #queue == 1 and "" or "s"))
+    for i, qid in ipairs(queue) do
+        C_Timer.After((i - 1) * 0.6, function()
+            -- a fight started mid-way: stop (say so once); press Share again afterwards
+            if InCombatLockdown() then
+                if not mod._shareStopped then mod._shareStopped = true; VQ:Print("Sharing stopped for the fight: press Share again after it.") end
+                return
+            end
+            ShareQuest(qid, true)
+        end)
+    end
 end
 
 -- Put a group count at the right of a line's text (fs = the line's text, holder = the
@@ -3441,7 +3529,8 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             row.tip = QuestTipWithGroup(qid, e.zone, groupNames)
             row.partyN = nGroup
             row:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
-                if btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
+                if IsAltKeyDown() then ShareQuest(qid)
+                elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
             end)
         end
         SetRowParty(row, row.partyN or 0)   -- 0 for events, coffers and group titles
@@ -3735,7 +3824,8 @@ function mod:RenderQuestList(f, popH)
         row.bar:ClearAllPoints(); row.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, top - (ri - 1) * ROWH - 14)
         SetProgress(row.bar, pct)
         row.btn:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
-            if btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
+            if IsAltKeyDown() then ShareQuest(qid)
+            elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
         end)
         local nGroup, groupNames = GroupOnQuest(qid)
         SetLineParty(row.btn, row.title, nGroup)
@@ -3890,7 +3980,7 @@ function mod:ApplyWidth()
     if not f or f._sizing or (InCombatLockdown() and f:IsProtected()) then return end
     local pw, cw = PW(), CW()
     if math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
-    f.camp:SetWidth(pw - 200)
+    f.camp:SetWidth(pw - ((f.shareBtn and f.shareBtn:IsShown()) and 250 or 200))   -- room for Share in a group
     for _, fs in ipairs({ f.chapter, f.step, f.obj, f.side, f.meta, f.big }) do if fs then fs:SetWidth(cw) end end
     for _, row in ipairs(f.qRows or {}) do row:SetWidth(cw) end
     for _, row in ipairs(f.questRows or {}) do
