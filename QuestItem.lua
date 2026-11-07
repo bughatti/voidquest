@@ -377,7 +377,8 @@ local function update()
     updateCooldowns()
 end
 
-VQ.QuestItem = { Update = update }
+-- QuestText / LearnedFor are shared with Leftovers.lua (what your log's quests need).
+VQ.QuestItem = { Update = update, QuestText = questText, LearnedFor = learnedFor }
 
 -- /vq items: every quest item it knows, in order (distance in yards), and whether it's
 -- near enough to show.

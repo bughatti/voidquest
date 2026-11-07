@@ -21,6 +21,9 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Quest items, one click** — when a quest needs you to use an item ("fire the flare gun", "use the totem"), its button sits beside the panel while you're near that quest, closest quest on top, and goes away when you leave. On WoW Forever most quests never tell the game which item is theirs, so VoidQuest works it out: the item a quest hands you when you accept it, else an item the quest's text names. `/vq items` shows what it found.
 - **In a dungeon, its quests first** — inside a dungeon or raid the lines list that dungeon's quests; your outdoor quests wait under "+N more".
 
+### Leftover quest items
+- **What you can throw away** — quest items often stay in your bags after the quest. VoidQuest checks each one: still needed by a quest in your log (or it starts a quest you haven't done), **safe to destroy** (every quest it was tied to is turned in, and none can be done again), or **probably not needed** (nothing in your log needs it, but some quests use an item before you have them). The reason is in the item's tooltip; `/vq leftovers` lists them. With **VoidBags**, leftovers get a red X or a yellow ? in your bags. Nothing is ever destroyed for you.
+
 ### Quest rewards
 - **Upgrade or gold** — when a quest lets you choose, a green arrow marks the reward that's an upgrade for you (stat-based with VoidGear, otherwise item level) and a gold coin marks the one worth the most gold. Hover a reward for why. You still pick.
 
@@ -62,6 +65,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 | `/vq box` | Show or hide the players online box |
 | `/vq rewards` | Reward advice on quest choices on / off |
 | `/vq items` | List the quest items VoidQuest found, which quest each is for, how far, and whether it's showing |
+| `/vq leftovers` | List quest items in your bags that nothing needs anymore, and why |
 | `/vq share` | WoW Forever: sharing quest givers on / off |
 | `/vq net` | WoW Forever: check that sharing gets through |
 | `/vq reset` | Put the panel back in the middle of the screen |

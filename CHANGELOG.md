@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.2.5 (beta)
+
+- **Leftover quest items.** Quest items often stay in your bags after the quest, and it's hard to tell what you can throw away. VoidQuest now checks each one: still needed (by a quest in your log, or it starts a quest you haven't done), **safe to destroy** (every quest it was tied to is turned in and can't be done again), or **probably not needed** (nothing in your log needs it, but it can't be sure what it was for). The reason shows in the item's tooltip, and `/vq leftovers` lists them. With VoidBags 1.2.28 they're marked in your bags. Nothing is ever destroyed for you.
+
 ## 0.2.4 (beta)
 
 - **Quest item buttons for every quest, near the quest.** Each quest item gets its own button beside the panel (up to 6), shown only while you're near that quest (within about 1,000 yards, or in its zone when the game doesn't know where it is), with the closest on top. Before, one button stuck to a single quest's item, even a continent away.

@@ -165,6 +165,8 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         VoidQuestRewardAdvice.Toggle()
     elseif msg == "items" and VoidQuest.QuestItemDebug then   -- what the quest item buttons see
         VoidQuest.QuestItemDebug()
+    elseif msg == "leftovers" and VoidQuest.LeftoversList then   -- quest items nothing needs anymore
+        VoidQuest.LeftoversList()
     elseif msg == "box" and _G.VoidPresence then   -- the "Players online" box (shared with VoidGather / VoidSweep)
         VoidPresence:SetShown(not VoidPresence:IsShown())
     elseif msg == "arrow" then
