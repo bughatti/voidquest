@@ -473,14 +473,23 @@ function mod:MapStep(zg)
     -- giver is known (ForeverZone's list: lowest level first, too-high ones left out)
     if not st and zg.forever and VQ.Forever then
         g.chapter = "Quests here first"
+        -- only quests in the Min / Mid / Max tier (Chains.lua: Min = important ones)
+        local skipped = false
         for _, e in ipairs(VQ.Forever:ZoneList(zg.name)) do
             if e.status == "open" and e.spot then
-                st = { qid = e.id, idx = 0, total = 0, status = "pickup", title = e.title,
-                       wpMap = e.spot.m, wpX = e.spot.x, wpY = e.spot.y }
-                break
+                if e.scope then
+                    st = { qid = e.id, idx = 0, total = 0, status = "pickup", title = e.title,
+                           wpMap = e.spot.m, wpX = e.spot.x, wpY = e.spot.y }
+                    break
+                end
+                skipped = true
             end
         end
-        if not st then g.chapter = "|cff55ff55No known quest to pick up here|r (zone list: /vq fz)" end
+        if not st then
+            g.chapter = skipped
+                and "|cff55ff55Nothing to pick up here at this density|r (Max shows every quest)"
+                or "|cff55ff55No known quest to pick up here|r (zone list: /vq fz)"
+        end
         return withLine(g, st, zg.map)
     end
     if not st then g.chapter = "|cff55ff55No more storylines offered here right now|r" end

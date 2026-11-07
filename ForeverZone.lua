@@ -40,6 +40,7 @@ function F:Info(id)
     return {
         id = id, title = r[1], zone = names[r[2]], faction = r[3], xp = r[4], money = r[5],
         flags = r[6], classes = r[7], races = r[8], group = names[r[9]], rewards = r[10],
+        rewardIDs = r[11],
     }
 end
 
@@ -139,18 +140,29 @@ function F:PlayerZone()
     end
 end
 
+-- In the Min / Mid / Max tier (Chains.lua grades; Max = everything).
+function F:InScope(id)
+    local C = VQ.Chains
+    return not C or C:InScope(id)
+end
+
 -- Eligible quests of a zone, sorted: in log, open (known spot, then level), open but not
--- for you yet ("later"), then done.
+-- for you yet ("later"), then done. e.scope: open and in the Min / Mid / Max tier (what
+-- the guide picks and the map pins); e.important: starred in the zone window.
 local ORDER = { log = 1, open = 2, later = 3, done = 4 }
 function F:ZoneList(zone)
     local out = {}
+    local C = VQ.Chains
     for _, id in ipairs(Index()[zone] or {}) do
         local r = VQ.ForeverQuests[id]
         if self:Eligible(r) then
             local st = self:Status(id)
             if st == "open" and not self:Available(id) then st = "later" end
+            local live = st == "open" or st == "log"
             out[#out + 1] = { id = id, title = r[1], flags = r[6], status = st,
-                spot = self:Spot(id), level = self:Level(id) }
+                spot = self:Spot(id), level = self:Level(id),
+                scope = st == "open" and self:InScope(id),
+                important = live and C and C:Important(id) or false }
         end
     end
     table.sort(out, function(a, b)
@@ -328,7 +340,8 @@ function F:Render()
             for c in e.flags:gmatch("[dwDRP]") do tag = tag .. " |cff88ccff(" .. FLAG_TEXT[c] .. ")|r" end
             local color = (e.status == "done" or e.status == "later") and "|cff777777"
                 or e.status == "log" and "|cffffd200" or "|cffffffff"
-            row.text:SetText(color .. lv .. e.title .. "|r" .. tag)
+            local star = e.important and VQ.Chains.STAR or ""
+            row.text:SetText(star .. color .. lv .. e.title .. "|r" .. tag)
             row.right:SetText(e.status == "done" and "done" or e.status == "log" and "in log"
                 or e.status == "later" and "later" or e.spot and "|cff88ccffpin|r" or "")
             row:Show()
@@ -396,7 +409,8 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
     end
     for id, r in pairs(VQ.ForeverQuests or {}) do
         local s = F:Spot(id)
-        if s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:Available(id) then
+        if s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:Available(id)
+           and F:InScope(id) then   -- Min / Mid / Max
             local x, y = s.x, s.y
             if s.m ~= mapID then
                 local cont, wp = safe(C_Map.GetWorldPosFromMapPos, s.m, CreateVector2D(x, y))

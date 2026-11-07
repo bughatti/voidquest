@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.2 (beta)
+
+- **A yellow star marks grey quests worth keeping.** When a quest in your log turns grey, a small star in front of its name means it still matters: a dungeon, elite or class quest, a blue or better reward, or a chain that leads to one. No star = safe to abandon. Hover a grey quest to see why. (Replaces the [keep] / [low] tags.)
+- **WoW Forever: Min / Mid / Max now work.** Min = important quests only (the starred kind), Mid = + every quest on a known quest chain, Max = every quest. It decides what the guide's "Next: Pick up" line and the map's "!" suggest; quests in your log always show. Forever starts on Max, the same as before.
+- **WoW Forever: the zone list (/vq fz) stars the important quests.**
+- **WoW Forever: blue rewards count before you pick a quest up**, so a quest is starred and kept on Min from the start.
+- **/vq chains** also shows how many quests in your zone each density keeps.
+
 ## 0.3.1 (beta)
 
 - **WoW Forever: the players box shows the right VoidQuest count.** VoidGather, VoidQuest and VoidSweep each read their own sharing channel's member list, but the game hands out only one list at a time, so they took it from each other and the count jumped around. They now take turns.

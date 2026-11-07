@@ -15,7 +15,7 @@ VQ.SettingsDefaults = {
     auto = true, autoAccept = true, autoTurnIn = true, autoReward = true, pauseOnChoice = true,
     autoAllQuests = false,   -- extend auto accept/turn-in beyond the campaign to EVERY quest
     -- guidance
-    density = "min", zoneOrder = "nearest", setWaypoint = true, superTrack = true, showRing = true, giverPins = true,
+    density = "min", foreverDensity = "max", zoneOrder = "nearest", setWaypoint = true, superTrack = true, showRing = true, giverPins = true,
     -- panel
     lockPanel = false, panelScale = 1.0, panelOpacity = 0.9, showObjective = true, showZoneSummary = true,
     panelHeight = 230,   -- fixed guide-panel height; quest lines fill the space the guide leaves
@@ -43,6 +43,8 @@ function mod:Apply(key)
         VQ.Minimap:SetShown(VQ:Get("minimapShow"))
     end
     if key == "share" and VQ.Share then VQ.Share:Apply() end
+    -- WoW Forever's Min / Mid / Max: the map's "!" and the zone list follow it
+    if key == "foreverDensity" and VQ.Forever and VQ.Forever.Refresh then VQ.Forever:Refresh() end
     if VQ.Givers then VQ.Givers:Refresh() end   -- density / giverPins change what's highlighted
     if key == "showRing" and VQ.Ring and VQ.Ring.provider and WorldMapFrame:IsShown() then
         VQ.Ring.provider:RefreshAllData()
@@ -175,7 +177,8 @@ function mod:EnsurePanel()
     makeCheck(f, x, y, "Native objective ring (super-track)", "superTrack", "Use Blizzard's objective-area blob + tracking arrow for in-progress quests."); y = y - 24
     makeCheck(f, x, y, "Objective ring on the world map", "showRing", "Draw a green circle on the world map where the current step happens -- the quest giver, the objective area, or the turn-in."); y = y - 26
     makeCheck(f, x, y, "Highlight needed quest givers", "giverPins", "Light-blue halo on the world map (under Blizzard's !) and minimap for the quest givers in your scope: the Density tier plus the chain the guide follows. Turn Blizzard's Outline Mode off so only these stand out."); y = y - 24
-    makeSegment(f, x, y, "Density", "density", { { val = "min", text = "Min" }, { val = "mid", text = "Mid" }, { val = "max", text = "Max" } }); y = y - 26
+    -- WoW Forever has its own tier (foreverDensity, Chains.lua C:InScope)
+    makeSegment(f, x, y, "Density", VQ.ForeverQuests and "foreverDensity" or "density", { { val = "min", text = "Min" }, { val = "mid", text = "Mid" }, { val = "max", text = "Max" } }); y = y - 26
     makeSegment(f, x, y, "Zone order", "zoneOrder", { { val = "nearest", text = "Nearest" }, { val = "grouped", text = "Grouped" } }); y = y - 28
     local csb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     csb:SetSize(220, 20); csb:SetPoint("TOPLEFT", x, y); csb:SetText("Select campaign to follow..."); fitButton(csb, 220)

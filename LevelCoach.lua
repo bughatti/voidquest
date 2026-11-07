@@ -303,7 +303,9 @@ local function ForeverStep()
             open = open + 1
             if e.spot then
                 known = known + 1
-                pick = pick or e   -- ZoneList sorts open quests with a known start first, lowest level first
+                -- ZoneList sorts open quests with a known start first, lowest level first;
+                -- only ones in the Min / Mid / Max tier are suggested
+                if e.scope then pick = pick or e end
             end
         end
     end

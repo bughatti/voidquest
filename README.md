@@ -25,7 +25,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **What you can throw away** — quest items often stay in your bags after the quest. VoidQuest checks each one: still needed by a quest in your log (or it starts a quest you haven't done), **safe to destroy** (every quest it was tied to is turned in, and none can be done again), or **probably not needed** (nothing in your log needs it, but some quests use an item before you have them). The reason is in the item's tooltip; `/vq leftovers` lists them. With **VoidBags**, leftovers get a red X or a yellow ? in your bags. Nothing is ever destroyed for you.
 
 ### Grey quests: keep or drop
-- **[keep] or [low] on grey quest lines** — a grey quest is marked **keep** when it still matters: a dungeon, raid, elite or class quest, a blue or better reward, or a chain that leads to one ("probably leads to Leaders of the Fang (dungeon quest)"). Otherwise it's **low value**, safe to abandon if you need the room. Hover the line for why; `/vq chains` lists them. Nothing is ever abandoned for you.
+- **A yellow star on grey quests worth keeping** — when a quest in your log turns grey, a small star in front of its name means it still matters: a dungeon, raid, elite or class quest, a blue or better reward, or a chain that leads to one ("probably leads to Leaders of the Fang (dungeon quest)"). **No star = safe to abandon.** Hover the line for why; `/vq chains` lists them. Nothing is ever abandoned for you.
 - **Quest chains** (WoW Forever): Blizzard keeps Classic quest chains on its servers, so VoidQuest ships them (thousands, from NorgannonDB) and learns more as you play: turn a quest in and the next one the NPC offers is its follow-up.
 
 ### Where quest items come from
@@ -47,7 +47,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Quests inside dungeons and delves** — the arrow points at the entrance, not at a random field.
 
 ### WoW Forever
-- **Every quest in a zone** — a zone list with level, XP and rewards for all of Forever's quests (from Blizzard's own quest data), marked done, in your log, or still to do.
+- **Every quest in a zone** — a zone list with level, XP and rewards for all of Forever's quests (from Blizzard's own quest data), marked done, in your log, or still to do. Important ones have a yellow star.
+- **Density** — Min (important quests only: dungeon, elite and class quests, blue rewards, and chains that lead to them), Mid (plus every quest on a known chain) or Max (every quest, the default). It decides what the guide suggests next and which "!" the map shows; quests in your log always show.
 - **"!" on your map for quests you can take** — Forever's map shows none, so VoidQuest brings its own: thousands of quest givers ship with it, and it learns more as you play (where you picked a quest up, and every quest an NPC offers you, even ones you don't take).
 - **Too-high quests stay off the map** — quests five or more levels above you, and quests a giver didn't offer you yet (level or an earlier quest first). They come back as you level.
 - **Shared with other VoidQuest players** — when you find a quest giver, a few other VoidQuest players online learn it, and you learn theirs. A spot is only used once two players agree on it. See Privacy below.
@@ -73,7 +74,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 | `/vq rewards` | Reward advice on quest choices on / off |
 | `/vq items` | List the quest items VoidQuest found, which quest each is for, how far, and whether it's showing |
 | `/vq leftovers` | List quest items in your bags that nothing needs anymore, and why |
-| `/vq chains` | Grey quests in your log: keep or low value, and why |
+| `/vq chains` | Grey quests in your log: starred (keep) or not, and why; on WoW Forever, how many quests here each density keeps |
 | `/vq drops` | Where your quests' items have come from (mobs and objects you looted) |
 | `/vq share` | WoW Forever: sharing quest givers on / off |
 | `/vq net` | WoW Forever: check that sharing gets through |

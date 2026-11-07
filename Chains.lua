@@ -15,7 +15,9 @@
 --
 -- Grading (grey quests): KEEP when it's a dungeon / raid / elite / class quest, rewards a
 -- blue or better item, or a known chain leads to one of those; LOW VALUE otherwise ("no
--- follow-up known yet" while nobody has followed it). Marks only: nothing is abandoned.
+-- follow-up known yet" while nobody has followed it). Shown as a yellow star in front of a
+-- grey KEEP quest; no star = safe to abandon. Marks only: nothing is abandoned.
+-- The same grade drives WoW Forever's Min / Mid / Max (C:InScope).
 ----------------------------------------------------------------------
 local VQ = VoidQuest
 local function safe(fn, ...) if not fn then return nil end local ok, a, b, c, d = pcall(fn, ...) if ok then return a, b, c, d end end
@@ -33,8 +35,14 @@ local function DB()
     return VoidQuestDB.chains
 end
 
-local gradeCache, ownCache = {}, {}
-local function Invalidate() gradeCache, ownCache = {}, {} end
+-- Grades are cached; any quest-log change marks them stale, but they're redone at most
+-- every STALE_FOR seconds: QUEST_LOG_UPDATE fires on every kill, and the Forever zone
+-- list grades a whole zone (Min/Mid). Turn-ins, accepts and new links redo them at once.
+local STALE_FOR = 2
+local gradeCache, ownCache, prevOf = {}, {}, nil
+local stale, lastInv = false, 0
+local function Invalidate() gradeCache, ownCache, prevOf, stale, lastInv = {}, {}, nil, false, GetTime() end
+local function Fresh() if stale and GetTime() - lastInv >= STALE_FOR then Invalidate() end end
 
 -- strength: 2 = confirmed (the follow-up window opened by itself, no other window in
 -- between), 1 = probable (a new entry on the NPC's list, which a level-up or reputation
@@ -79,9 +87,42 @@ end
 
 local ev = CreateFrame("Frame")
 for _, e in ipairs({ "GOSSIP_SHOW", "QUEST_GREETING", "QUEST_DETAIL", "QUEST_TURNED_IN",
-                     "GOSSIP_CLOSED", "QUEST_FINISHED", "QUEST_LOG_UPDATE" }) do ev:RegisterEvent(e) end
-ev:SetScript("OnEvent", function(_, event, arg1)
-    if event == "QUEST_LOG_UPDATE" then Invalidate(); return end
+                     "GOSSIP_CLOSED", "QUEST_FINISHED", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED",
+                     "ITEM_DATA_LOAD_RESULT" }) do pcall(ev.RegisterEvent, ev, e) end
+-- reward items whose quality we asked the game for: 1 = waiting, 2 = loaded; a failed load
+-- is asked again after RETRY_AFTER s, up to MAX_TRIES times (Sol review: it was dropped
+-- for good, so a blue-reward quest could stay graded low)
+local itemAsked, itemTries = {}, {}
+local RETRY_AFTER, MAX_TRIES = 60, 3
+local redraw           -- a reward's quality arrived: redo the grades and redraw, once per burst
+local function Redraw()
+    if redraw then return end
+    redraw = true
+    C_Timer.After(0.5, function()
+        redraw = nil
+        Invalidate()
+        if VQ.Forever and VQ.Forever.Refresh then VQ.Forever:Refresh() end
+        if VQ.Guide and VQ.Guide.Refresh then VQ.Guide:Refresh() end
+    end)
+end
+ev:SetScript("OnEvent", function(_, event, arg1, arg2)
+    if event == "QUEST_LOG_UPDATE" then stale = true; return end
+    if event == "QUEST_ACCEPTED" then Invalidate(); return end
+    if event == "ITEM_DATA_LOAD_RESULT" then   -- itemID, success
+        if itemAsked[arg1] == 1 then
+            if arg2 == false then
+                itemAsked[arg1] = 3   -- failed
+                if (itemTries[arg1] or 0) < MAX_TRIES then
+                    local id = arg1
+                    C_Timer.After(RETRY_AFTER, function() if itemAsked[id] == 3 then itemAsked[id] = nil; Redraw() end end)
+                end
+            else
+                itemAsked[arg1] = 2
+                Redraw()
+            end
+        end
+        return
+    end
     -- the window closed after the turn-in: whatever opens next may be a new interaction
     if event == "GOSSIP_CLOSED" or event == "QUEST_FINISHED" then
         if pending then pending.closed = true end
@@ -146,9 +187,34 @@ local function Title(qid)
     return (i and i.title) or ("quest " .. qid)
 end
 
+-- A blue (rare) or better reward of a quest you haven't picked up: WoW Forever's quest
+-- data lists the reward item IDs, the game tells their quality (asked once per item;
+-- ITEM_DATA_LOAD_RESULT regrades when it arrives).
+local function BlueRewardByData(qid)
+    local i = Info(qid)
+    local ids = i and i.rewardIDs
+    if not (ids and ids ~= "" and C_Item and C_Item.GetItemQualityByID) then return nil end
+    for s in ids:gmatch("%d+") do
+        local id = tonumber(s)
+        local q = safe(C_Item.GetItemQualityByID, id)
+        if type(q) == "number" and not secret(q) then
+            if q >= 3 then
+                local name = C_Item.GetItemNameByID and safe(C_Item.GetItemNameByID, id)
+                return "rewards " .. ((type(name) == "string" and not secret(name) and name) or "a blue item")
+            end
+        elseif not itemAsked[id] and C_Item.RequestLoadItemDataByID then
+            itemAsked[id] = 1
+            itemTries[id] = (itemTries[id] or 0) + 1
+            safe(C_Item.RequestLoadItemDataByID, id)
+        end
+    end
+    return nil
+end
+
 -- Why a quest matters on its own, or nil. Cached until the quest log / chains change.
 local OwnReasonUncached
 local function OwnReason(qid)
+    Fresh()
     local c = ownCache[qid]
     if c == nil then c = OwnReasonUncached(qid) or false; ownCache[qid] = c end
     return c or nil
@@ -182,8 +248,9 @@ OwnReasonUncached = function(qid)
             local ok, name, _, _, quality = pcall(GetQuestLogChoiceInfo, i2, qid)
             if ok and type(quality) == "number" and quality >= 3 then return "reward choice " .. tostring(name) end
         end
+        return nil
     end
-    return nil
+    return BlueRewardByData(qid)
 end
 
 -- A quest's known follow-ups: { [next] = 2 confirmed / 1 probable }. Your own live
@@ -253,6 +320,7 @@ local function GradeUncached(qid)
     return "low", "no notable reward, no follow-up known yet"
 end
 function C:Grade(qid)
+    Fresh()
     local c = gradeCache[qid]
     if not c then
         local g, why = GradeUncached(qid)
@@ -262,11 +330,48 @@ function C:Grade(qid)
     return c[1], c[2]
 end
 
--- Short tag for a quest line: only grey quests get one.
-function C:Tag(qid)
+-- The yellow star (the raid-marker star: in every client), sized to the text.
+C.STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t "
+
+-- The user, 2026-11-07: a grey quest that matters gets a small yellow star in front of its
+-- name ("do it and keep it"); a grey quest without one can be abandoned. Not grey: nothing.
+function C:Star(qid)
     if not qid or not IsGrey(qid) then return "" end
-    local g = self:Grade(qid)
-    return g == "keep" and " |cff3ddc84[keep]|r" or " |cff888888[low]|r"
+    return self:Grade(qid) == "keep" and self.STAR or ""
+end
+
+-- Important = graded keep (any colour): the Forever zone list stars these.
+function C:Important(qid) return qid and self:Grade(qid) == "keep" or false end
+
+-- On a known chain: has a follow-up or comes after another quest.
+local function HasPrev(q)
+    if not prevOf then
+        prevOf = {}
+        for _, t in pairs(VQ.ForeverChains or {}) do for b in pairs(t) do prevOf[b] = true end end
+        for _, t in pairs(DB()) do for b in pairs(t) do prevOf[b] = true end end
+    end
+    return prevOf[q] == true
+end
+function C:InChain(qid)
+    Fresh()
+    return HasPrev(qid) or next(NextOf(qid)) ~= nil
+end
+
+-- WoW Forever's Min / Mid / Max (retail runs on Blizzard's quest-line flags, which
+-- Forever doesn't have): which quests to pick up.
+--   Min: important ones (dungeon, raid, elite or class quest, a blue or better reward, or
+--        a known chain leading to one)
+--   Mid: + any quest on a known chain (not dailies / repeatables)
+--   Max: every quest
+function C:InScope(qid, density)
+    density = density or (VQ.Guide and VQ.Guide.Density and VQ.Guide:Density()) or "max"
+    if density == "max" then return true end
+    if self:Important(qid) then return true end
+    if density == "mid" then
+        local i = Info(qid)
+        return self:InChain(qid) and not (i and i.flags and i.flags:find("[dwr]"))
+    end
+    return false
 end
 
 -- The reason, under a quest's tooltip (grey quests only).
@@ -274,9 +379,9 @@ function C:AddTooltip(tt, qid)
     if not qid or not IsGrey(qid) then return end
     local g, why = self:Grade(qid)
     if g == "keep" then
-        tt:AddLine("Grey, but worth keeping: " .. why, 0.24, 0.86, 0.52, true)
+        tt:AddLine(self.STAR .. "Grey, but worth doing and keeping: " .. why, 1, 0.82, 0, true)
     else
-        tt:AddLine("Grey, low value: " .. why .. ". Safe to abandon if you need the room.", 0.6, 0.6, 0.6, true)
+        tt:AddLine("Grey, no star: " .. why .. ". Safe to abandon.", 0.6, 0.6, 0.6, true)
     end
 end
 
@@ -297,6 +402,24 @@ function C:List()
         end
     end
     if not any then print(p .. "no grey quests in your log") end
+    -- WoW Forever: how many quests you can pick up here each Min / Mid / Max tier keeps
+    local F = VQ.Forever
+    local zone = F and F.Active and F:Active() and F:PlayerZone()
+    if zone then
+        local open, mn, md, names = 0, 0, 0, {}
+        for _, e in ipairs(F:ZoneList(zone)) do
+            if e.status == "open" then
+                open = open + 1
+                if self:InScope(e.id, "min") then
+                    mn = mn + 1
+                    if #names < 6 then names[#names + 1] = e.title end
+                end
+                if self:InScope(e.id, "mid") then md = md + 1 end
+            end
+        end
+        print(p .. ("%s: %d quests to pick up; Min keeps %d, Mid %d, Max %d"):format(zone, open, mn, md, open))
+        if #names > 0 then print(p .. "important: " .. table.concat(names, ", ") .. (mn > #names and ", ..." or "")) end
+    end
     print(p .. ("%d chain link%s learned on this account, %d shipped with VoidQuest"):format(
         links, links == 1 and "" or "s", shipped))
 end

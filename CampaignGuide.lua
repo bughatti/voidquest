@@ -1661,11 +1661,15 @@ local DENSITY_ORDER = { "min", "mid", "max" }
 local DENSITY_SHORT = { min = "Min", mid = "Mid", max = "Max" }
 local DENSITY_LABEL = { min = "Min (story)", mid = "Mid (+side stories)", max = "Max (all)" }
 
-function mod:Density() return VQ:Get("density") end
+-- WoW Forever keeps its own tier (Chains.lua C:InScope; default Max): density did nothing
+-- there before 0.3.2, so a shared "min" default would have hidden most quests overnight.
+local function DensityKey() return VQ.ForeverQuests and "foreverDensity" or "density" end
+mod.DensityKey = DensityKey
+function mod:Density() return VQ:Get(DensityKey()) end
 function mod:SetDensity(d)
     self._lastStep = nil                       -- force the waypoint to re-fire
     self._stick = nil                          -- a new tier picks its own side quest
-    VQ:Set("density", d)                        -- writes + Apply() -> Refresh + settings sync
+    VQ:Set(DensityKey(), d)                     -- writes + Apply() -> Refresh + settings sync
     if self.picker and self.picker:IsShown() then self:RefreshPicker() end
 end
 function mod:CycleDensity()
@@ -2631,10 +2635,18 @@ function mod:EnsurePanel()
     f.densityBtn:SetScript("OnEnter", function(s)
         GameTooltip:SetOwner(s, "ANCHOR_LEFT")
         GameTooltip:AddLine("Quest density (click to cycle)")
-        GameTooltip:AddLine("Min = story campaign only", .7, .7, .7)
-        GameTooltip:AddLine("Mid = + the zone's side storylines", .7, .7, .7)
-        GameTooltip:AddLine("Max = every quest in the zone", .7, .7, .7)
-        GameTooltip:AddLine("Mid and Max also show a side quest on the way to your current step.", .7, .7, .7, true)
+        if VQ.ForeverQuests then
+            -- WoW Forever: which quests the guide and the map's "!" suggest (Chains.lua)
+            GameTooltip:AddLine("Min = important quests: dungeon, elite and class quests, blue rewards, and chains that lead to them", .7, .7, .7, true)
+            GameTooltip:AddLine("Mid = + every quest on a known chain", .7, .7, .7)
+            GameTooltip:AddLine("Max = every quest", .7, .7, .7)
+            GameTooltip:AddLine("Quests in your log always show. A yellow star marks the important ones.", .7, .7, .7, true)
+        else
+            GameTooltip:AddLine("Min = story campaign only", .7, .7, .7)
+            GameTooltip:AddLine("Mid = + the zone's side storylines", .7, .7, .7)
+            GameTooltip:AddLine("Max = every quest in the zone", .7, .7, .7)
+            GameTooltip:AddLine("Mid and Max also show a side quest on the way to your current step.", .7, .7, .7, true)
+        end
         GameTooltip:Show()
     end)
     f.densityBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3420,10 +3432,10 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             local mark = (qid == tracked or self:InstancePinUp(qid)) and "|cff55ff55> |r" or ""
             local tag = (e.kind == "wq" and " |cff88ccff[WQ]|r") or (e.kind == "task" and " |cff88ccff[bonus]|r")
                 or (e.zone and (" |cff888888[%s]|r"):format(e.zone)) or ""
-            -- grey quests: keep (it matters / leads somewhere) or low value (Chains.lua)
-            if VQ.Chains and not e.kind then tag = VQ.Chains:Tag(qid) .. tag end
+            -- grey quests that matter: a yellow star in front (Chains.lua); no star = abandon
+            local star = (VQ.Chains and not e.kind) and VQ.Chains:Star(qid) or ""
             local sum = ObjSummary(qid)
-            text = ("%s|cff%s%s|r%s%s"):format(mark, (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
+            text = ("%s%s|cff%s%s|r%s%s"):format(mark, star, (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
                 sum ~= "" and ("|cffaaaaaa: %s|r"):format(sum) or "")
             local nGroup, groupNames = GroupOnQuest(qid)
             row.tip = QuestTipWithGroup(qid, e.zone, groupNames)
@@ -3702,9 +3714,10 @@ function mod:RenderQuestList(f, popH)
         local tag = (kinds[qid] == "wq" and " |cff88ccff[WQ]|r") or (kinds[qid] == "task" and " |cff88ccff[bonus]|r")
             or (dungeonQ[qid] and " |cff88ccff[dungeon]|r")
             or (zoneTag[qid] and (" |cff888888[%s]|r"):format(zoneTag[qid])) or ""
-        if VQ.Chains and not kinds[qid] then tag = VQ.Chains:Tag(qid) .. tag end   -- grey: keep / low value
+        -- grey quests that matter: a yellow star in front (Chains.lua); no star = abandon
+        local star = (VQ.Chains and not kinds[qid]) and VQ.Chains:Star(qid) or ""
         local mark = (qid == tracked) and "|cff55ff55> |r" or ""
-        row.title:SetText(mark .. "|cff" .. (LevelColor(qid)) .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
+        row.title:SetText(mark .. star .. "|cff" .. (LevelColor(qid)) .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
         local obj = ""
         local pct = (not complete) and ProgressPercent(qid) or nil
         if complete then
@@ -4148,7 +4161,8 @@ function mod:Refresh()
         if sideText then extra(f.side, f.sideBtn, sideText) end
         -- one big-XP offer anywhere on the continent (dungeon quest, special quest): worth
         -- a trip even from another zone. Mid/Max or level-gated, below max level.
-        local big = (r.levelGate or r.density ~= "min") and self:BigXPOffer()
+        -- (not on WoW Forever: it runs on quest lines, which Forever has none of)
+        local big = not VQ.ForeverQuests and (r.levelGate or r.density ~= "min") and self:BigXPOffer()
         if big and big.qid ~= step.qid and not (meta and big.qid == meta.qid) then
             self._big = big
             local mi = safe(C_Map.GetMapInfo, big.map)
