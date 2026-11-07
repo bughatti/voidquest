@@ -2,7 +2,7 @@
 
 **A quest guide that reads the game live: your campaign, your zone, and the quest nearest to you, on retail and WoW Forever.**
 
-VoidQuest shows one small panel with the next thing to do and pins it on your map. It builds its steps from the game itself (campaigns, quest lines, your quest log), so it covers new content on day one instead of waiting for a hand-written guide. On WoW Forever, where the map shows no quest givers, it learns where quests start as you and other VoidQuest players play. **Beta:** expect rough edges and tell us on Discord.
+VoidQuest shows one small panel with the next thing to do and pins it on your map. It builds its steps from the game itself (campaigns, quest lines, your quest log), so it covers new content on day one instead of waiting for a hand-written guide. On WoW Forever, where the map shows no quest givers, it ships with thousands of quest givers, turn-ins and quest chains (from NorgannonDB, see Credits) and fills the rest in as you and other VoidQuest players play. **Beta:** expect rough edges and tell us on Discord.
 
 ---
 
@@ -26,7 +26,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 
 ### Grey quests: keep or drop
 - **[keep] or [low] on grey quest lines** — a grey quest is marked **keep** when it still matters: a dungeon, raid, elite or class quest, a blue or better reward, or a chain that leads to one ("probably leads to Leaders of the Fang (dungeon quest)"). Otherwise it's **low value**, safe to abandon if you need the room. Hover the line for why; `/vq chains` lists them. Nothing is ever abandoned for you.
-- **Quest chains are learned** (WoW Forever): Blizzard keeps Classic quest chains on its servers, so VoidQuest learns them as you play: turn a quest in and the next one the NPC offers is its follow-up. Every update ships the chains found so far.
+- **Quest chains** (WoW Forever): Blizzard keeps Classic quest chains on its servers, so VoidQuest ships them (thousands, from NorgannonDB) and learns more as you play: turn a quest in and the next one the NPC offers is its follow-up.
 
 ### Where quest items come from
 - **The quest line's tooltip names the source** — "Plainstrider Kidney: from Greater Plainstrider (12)", learned from what you loot. `/vq drops` lists it. Nothing is drawn on your map.
@@ -48,10 +48,10 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 
 ### WoW Forever
 - **Every quest in a zone** — a zone list with level, XP and rewards for all of Forever's quests (from Blizzard's own quest data), marked done, in your log, or still to do.
-- **"!" on your map for quests whose giver is known** — Forever's map shows none, so VoidQuest learns them: where you picked a quest up, and every quest an NPC offers you, even ones you don't take.
+- **"!" on your map for quests you can take** — Forever's map shows none, so VoidQuest brings its own: thousands of quest givers ship with it, and it learns more as you play (where you picked a quest up, and every quest an NPC offers you, even ones you don't take).
 - **Too-high quests stay off the map** — quests five or more levels above you, and quests a giver didn't offer you yet (level or an earlier quest first). They come back as you level.
 - **Shared with other VoidQuest players** — when you find a quest giver, a few other VoidQuest players online learn it, and you learn theirs. A spot is only used once two players agree on it. See Privacy below.
-- **Ships with the quest givers we've found** — every update carries the spots VoidQuest players have confirmed.
+- **Ships with quest givers, turn-ins and chains** — from NorgannonDB, plus the spots VoidQuest players have confirmed. Where players' finds differ, they win.
 - **Players online box** — how many other VoidQuest players are online (shared with VoidGather and VoidSweep).
 
 ---
@@ -102,7 +102,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 
 ## Good to Know
 
-- On WoW Forever, quest givers nobody has found yet aren't on the map. They fill in as players use VoidQuest, and every update ships more.
+- On WoW Forever, the few quest givers missing from the shipped data fill in as players use VoidQuest. Sharing only sends what the shipped data doesn't already have, so it stays light.
 - The game has no way to ask for a quest's required level, so VoidQuest learns it from what quest givers offer you.
 - Settings and learned quest givers are shared across your characters.
 
@@ -115,4 +115,11 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 
 ---
 
-*Part of the Void addon family by Vede · MIT licensed · [Source & bug reports](https://github.com/bughatti/voidquest) · [All Void addons](https://www.curseforge.com/members/bughatti/projects) · free M+ & raid player lookups at [voidscout.io](https://voidscout.io) · more at [tinkerline.io](https://tinkerline.io) · [Discord](https://discord.gg/7ZHmx7zMDh)*
+## Credits
+
+- **Quest givers, turn-ins and quest chains on WoW Forever** come from [NorgannonDB](https://github.com/zmarotrix/NorgannonDB) by Maro (GPL-3.0), which builds on [QuestieDB](https://github.com/Questie/Questie) (GPL-3.0) and pfQuest, and reads WoW Forever's own game tables. Thank you.
+- Quest names, rewards and levels come from Blizzard's own game data. World of Warcraft is a trademark of Blizzard Entertainment.
+
+---
+
+*Part of the Void addon family by Vede · GPL-3.0 licensed · [Source & bug reports](https://github.com/bughatti/voidquest) · [All Void addons](https://www.curseforge.com/members/bughatti/projects) · free M+ & raid player lookups at [voidscout.io](https://voidscout.io) · more at [tinkerline.io](https://tinkerline.io) · [Discord](https://discord.gg/7ZHmx7zMDh)*

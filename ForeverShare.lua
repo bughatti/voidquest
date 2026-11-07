@@ -150,6 +150,17 @@ local function shareable(s)
         and s.x > 0 and s.x < 1 and s.y > 0 and s.y < 1
 end
 
+-- Every player already has the shipped seed (VoidQuest.ForeverSeed, NorgannonDB-backed since
+-- 0.3.0): a find it already holds isn't sent. Addon messages are small and throttled, so only
+-- gaps and real corrections (the giver somewhere else) go out (the user, 2026-11-06).
+local function seedHas(q, s)
+    local d = q and VQ.ForeverSeed and VQ.ForeverSeed[q]
+    if not (d and d.m and d.x and d.y) or d.m ~= s.m then return false end
+    -- same NPC too: a different giver at the same spot is a correction worth sending (Codex review)
+    if d.giver and s.npc and d.giver ~= s.npc then return false end
+    return math.abs(d.x - s.x) < 0.03 and math.abs(d.y - s.y) < 0.03
+end
+
 local function encode(qid, s)
     local name = cleanName(s.npc)
     if not name then return nil end
@@ -329,7 +340,7 @@ function Share:Found(qids)
     if not (enabled() and VoidQuestDB and VoidQuestDB.starts) then return end
     for _, q in ipairs(qids) do
         local s = VoidQuestDB.starts[q]
-        if shareable(s) and not pending[q] then
+        if shareable(s) and not seedHas(q, s) and not pending[q] then
             pending[q] = GetTime() + HOLD_MIN + math.random() * HOLD_SPREAD
             s.t, s.sent = s.t or time(), nil   -- saved: the hold survives a /reload
         end
@@ -350,7 +361,7 @@ local function ownOn(mapID)
     local out = {}
     for q, s in pairs(VoidQuestDB and VoidQuestDB.starts or {}) do
         -- finds still held back (PRIVACY) aren't in answers either
-        if type(q) == "number" and shareable(s) and s.m == mapID and not pending[q] and not fresh(s) then
+        if type(q) == "number" and shareable(s) and not seedHas(q, s) and s.m == mapID and not pending[q] and not fresh(s) then
             local e = encode(q, s)
             if e then out[#out + 1] = e end
             if #out >= REPLY_MAX then break end

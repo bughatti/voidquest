@@ -1,5 +1,12 @@
 # VoidQuest Changelog
 
+## 0.3.0 (beta)
+
+- **WoW Forever: thousands of quest givers, turn-ins and quest chains out of the box.** VoidQuest now ships data from NorgannonDB (about 4,500 quest givers with their spots, turn-in NPCs, and 3,600 chain links), instead of only the givers players had found so far (176). The map's "!" markers, the zone list and the grey quest keep / drop marks all use it. Your own finds still win where they differ.
+- **Grey quests are graded on real chains**, so a grey quest that leads to a good reward or a dungeon quest is marked keep.
+- **Lighter sharing.** VoidQuest only shares quest givers the shipped data doesn't already have.
+- **Licence: VoidQuest is now GPL-3.0** (was MIT), because it includes NorgannonDB's data. See Credits in the README.
+
 ## 0.2.6 (beta)
 
 - **Grey quests: keep or drop.** Grey quest lines are marked **[keep]** when they still matter (a dungeon, raid, elite or class quest, a blue reward, or a chain leading to one) or **[low]** when they're safe to abandon. Hover for why; `/vq chains` lists them.
