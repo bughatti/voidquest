@@ -50,9 +50,10 @@ local function changed() db().stamp = time() end
 
 -- count = other players heard in your zone; capped = answers stopped at the
 -- cap (busy zone, show "10+"); known = false when it can't count (sharing
--- off, inside an instance).
-function P:Set(addon, label, count, capped, known)
-    self.lines[addon] = { label = label, count = count or 0, capped = capped, known = known ~= false }
+-- off, inside an instance); note = a short word shown instead of the count
+-- ("blocked": the server won't let you into that addon's channel).
+function P:Set(addon, label, count, capped, known, note)
+    self.lines[addon] = { label = label, count = count or 0, capped = capped, known = known ~= false, note = note }
     self:Update()
 end
 
@@ -100,6 +101,7 @@ local function build()
         if FOREVER() then
             GameTooltip:AddLine("Other players online running each Void addon, counted from its sharing channel. Updates every 10 minutes. (WoW Forever can't count by zone.)", 0.8, 0.8, 0.8, true)
             GameTooltip:AddLine("Not counted with sharing off.", 0.6, 0.6, 0.6, true)
+            GameTooltip:AddLine("\"blocked\": the game won't let you into that addon's sharing channel (its owner banned you, or it has another password). Its /net command says more.", 0.6, 0.6, 0.6, true)
         else
             GameTooltip:AddLine("Other players in your zone running each Void addon, counted over its sharing channel. Updates when people come and go, and every 10 minutes.", 0.8, 0.8, 0.8, true)
             GameTooltip:AddLine("Busy zones show 10+. Not counted in instances or with sharing off.", 0.6, 0.6, 0.6, true)
@@ -138,7 +140,9 @@ function P:Update()
         row.left:SetPoint("TOPLEFT", 8, -6 - i * 13)
         row.right:SetPoint("TOPRIGHT", -8, -6 - i * 13)
         row.left:SetText(l.label)
-        if not l.known then
+        if l.note then
+            row.right:SetText("|cffff7755" .. l.note .. "|r")
+        elseif not l.known then
             row.right:SetText("|cff8c8c9e—|r")
         elseif l.capped and l.count == 0 then
             -- busy zone, and everyone we'd counted has left: others are still there

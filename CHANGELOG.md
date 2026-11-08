@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.9 (beta)
+
+- **WoW Forever: quest sharing moved to a new password-protected channel, a fresh one every day.** The old channel was open: anyone could join it by hand, become its owner and ban players, and a banned player's sharing silently stopped (the players box showed "—"). Now every VoidQuest player joins that day's channel with its password, and at 00:00 UTC everyone moves to the next one together, so even if someone gets in, it only lasts until the next day. Players on older versions still get whispers but aren't counted until they update.
+- **"blocked" in the players box** when the game won't let you into the sharing channel, and `/vq net` says why.
+
 ## 0.3.8 (beta)
 
 - **WoW Forever: see what quest sharing is doing.** `/vq net` now also lists the sharing traffic since the counter started: questions and new quest givers sent to and received from other VoidQuest players, how often nobody else was online, and how often a question had nothing new to answer. Most quest givers already ship with the addon, so sharing is quiet by design; this shows it's working.

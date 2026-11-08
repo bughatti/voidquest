@@ -10,7 +10,7 @@
 -- return 0 but the server refuses them (CHAT_MSG_CHANNEL_NOTICE NOT_ALLOWED_IN_CHANNEL,
 -- nothing delivered; it worked on the beta). GUILD sends but never echoes. Addon WHISPERS
 -- work, to the bare "First Surname" name (Forever names are unique per region, no realm).
--- So the hidden channel VoidQuestNet is only a member list -- who runs VoidQuest right
+-- So the hidden channel (VoidQuestLink) is only a member list -- who runs VoidQuest right
 -- now -- and the messages go by addon whisper to a few random members:
 --   N:1:mapID:entries   quest givers you found -> up to FANOUT members (held back, PRIVACY)
 --   Q:1:mapID           "any givers for this map?" -> up to ASK_PEERS members (zone change)
@@ -51,7 +51,33 @@ VQ.Share = Share
 
 local PREFIX        = "VQUEST"
 local PROTO         = "1"
-local CHANNEL_NAME  = "VoidQuestNet"
+-- 2026-11-08: the first channel, VoidQuestNet, was open: anyone could /join it, own it once
+-- it emptied and /ban players. The author's character got banned; the server then answers
+-- the join NOT_ALLOWED_IN_CHANNEL and lists the channel joined but DISABLED, with no member
+-- list (so the players box said "—" all day). Now a new channel EVERY DAY, joined with a
+-- password, both worked out from the server's date (same scheme as WhisperNet.lua's "Daily
+-- channel" in VoidGather / VoidSweep): a /join by hand is refused, and if someone works it
+-- out anyway, a ban or a takeover only lasts until 00:00 UTC. Neither is in this file as
+-- text. Older versions stay in VoidQuestNet until they update.
+local DAILY_TAG, DAILY_SALT = "Vq", 40692
+local OLD_CHANNELS  = { "VoidQuestNet", "VoidQuestLink" }
+local CODE = "bcdfghjkmnpqrstvwxz23456789"   -- no vowels: no accidental words for the name filter
+local function mix(h, n) return (h * 31 + n) % 2147483629 end
+local function code(seed, len)
+    local h, out = seed, {}
+    for i = 1, len do
+        h = mix(mix(h, i), 7919)
+        local k = h % #CODE + 1
+        out[i] = CODE:sub(k, k)
+    end
+    return table.concat(out)
+end
+local function dailyChannel(day)
+    day = day or math.floor(((GetServerTime and GetServerTime()) or time()) / 86400)
+    local s = mix(mix(DAILY_SALT, day), DAILY_SALT % 97)
+    return DAILY_TAG .. code(s, 6), code(mix(s, 104729), 8), day
+end
+local CHANNEL_NAME, CHANNEL_PW = dailyChannel()
 local MAX_LEN       = 250    -- SendAddonMessage cap is 255
 local SEND_EVERY    = 1.5    -- seconds between our outgoing whispers
 local QUEUE_MAX     = 60
@@ -98,6 +124,25 @@ local function enabled() return VQ:Get("share") ~= false end
 local function netIndex()
     local id = GetChannelName(CHANNEL_NAME)
     if id and id > 0 then return id end
+end
+
+-- A channel the game won't let us into (banned / other password; same as WhisperNet.lua's
+-- "Refused channels" in VoidGather and VoidSweep). Banned = listed joined but disabled.
+local function blocked()
+    if not GetChannelList then return false end
+    local t, want = { GetChannelList() }, CHANNEL_NAME:lower()
+    for i = 1, #t - 2, 3 do   -- id, name, disabled
+        if type(t[i + 1]) == "string" and t[i + 1]:lower() == want then return t[i + 2] == true end
+    end
+    return false
+end
+local refusedAs   -- "WRONG_PASSWORD" / "BANNED" from the last join's answer
+local function blockReason()
+    if blocked() or refusedAs == "BANNED" then
+        return ("the game won't let you into %s (its owner banned this character). Sharing can't count or reach players until that's lifted."):format(CHANNEL_NAME)
+    elseif refusedAs == "WRONG_PASSWORD" then
+        return ("%s has a different password (someone else set it). Sharing can't count or reach players there."):format(CHANNEL_NAME)
+    end
 end
 
 -- Strip anything that could act as an escape code or break the format, and cap the
@@ -213,7 +258,8 @@ local function publish()
         for _, name in ipairs(roster) do if unreach[name:lower()] then gone = gone + 1 end end
     end
     local others = memberCount and math.max(0, memberCount - 1 - gone)
-    VoidPresence:Set("VoidQuest", "VoidQuest online", others or 0, false, enabled() and others ~= nil)
+    local note = enabled() and blockReason() and "blocked" or nil
+    VoidPresence:Set("VoidQuest", "VoidQuest online", others or 0, false, enabled() and others ~= nil, note)
 end
 
 local function readRoster()
@@ -647,6 +693,13 @@ end)
 
 function Share:JoinNet()
     if not enabled() then return end
+    -- out of the old channels first, so their slots are free for the new one (Codex review).
+    -- A banned one can't be left; it goes at logout.
+    if not chatLocked() then
+        for _, old in ipairs(OLD_CHANNELS) do
+            if (GetChannelName(old) or 0) > 0 then LeaveChannelByName(old) end
+        end
+    end
     if not netIndex() then
         if chatLocked() then
             joinRetry:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -656,7 +709,8 @@ function Share:JoinNet()
             pcall(joinRetry.RegisterEvent, joinRetry, "ADDON_RESTRICTION_STATE_CHANGED")
             return
         end
-        JoinTemporaryChannel(CHANNEL_NAME)
+        JoinTemporaryChannel(CHANNEL_NAME, CHANNEL_PW)
+        C_Timer.After(5, publish)   -- a refused join shows as "blocked"
     end
     if netIndex() and ChatFrame_RemoveChannel then   -- keep it out of the chat tabs
         for i = 1, (NUM_CHAT_WINDOWS or 10) do
@@ -704,6 +758,7 @@ end
 -- Players box: count now when it's turned on, and every 10 minutes while it's shown.
 local function recount()
     if not (enabled() and _G.VoidPresence and VoidPresence:IsShown()) then return end
+    publish()   -- a blocked channel is never read, so say so now
     rosterAt = -ROSTER_EVERY
     requestRoster()
 end
@@ -723,6 +778,10 @@ end
 local function hideOfflineNotice(_, _, text) return bouncedName(text) ~= nil end
 
 function Share:Init()
+    local today
+    CHANNEL_NAME, CHANNEL_PW, today = dailyChannel()   -- again now that the server time is surely in
+    -- channels survive a /reload: yesterday's goes too (reload across 00:00 UTC, Codex)
+    table.insert(OLD_CHANNELS, (dailyChannel(today - 1)))
     me = canon(GetUnitName and GetUnitName("player") or UnitName("player"))
     -- offline marks saved per account, so a /reload doesn't count logged-off players
     VoidQuestDB = VoidQuestDB or {}
@@ -737,10 +796,24 @@ function Share:Init()
     f:RegisterEvent("CHAT_MSG_ADDON")
     f:RegisterEvent("CHANNEL_ROSTER_UPDATE")
     f:RegisterEvent("CHAT_MSG_SYSTEM")
+    f:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
     f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     f:RegisterEvent("ZONE_CHANGED")
-    f:SetScript("OnEvent", function(_, event, prefix, msg, channel, sender, _, _, localID)
-        if event == "CHAT_MSG_SYSTEM" then   -- our whisper bounced: unreachable for a while
+    f:SetScript("OnEvent", function(_, event, prefix, msg, channel, sender, _, _, localID, _, base)
+        if event == "CHAT_MSG_CHANNEL_NOTICE" then
+            -- arg1 = notice, arg4 = "6. Name", arg9 = Name. A refused join names the channel
+            -- (WRONG_PASSWORD / BANNED); NOT_ALLOWED_IN_CHANNEL doesn't, blocked() sees that one.
+            local notice, full = prefix, sender
+            if type(notice) ~= "string" or (issecretvalue and (issecretvalue(notice) or issecretvalue(full) or issecretvalue(base))) then return end
+            local name = type(base) == "string" and base ~= "" and base
+                or type(full) == "string" and full:match("^%d+%.%s*(.+)$") or full
+            if type(name) ~= "string" or name:lower() ~= CHANNEL_NAME:lower() then return end
+            if notice == "WRONG_PASSWORD" or notice == "BANNED" then
+                refusedAs = notice; publish()
+            elseif notice == "YOU_JOINED" or notice == "YOU_CHANGED" then
+                refusedAs = nil
+            end
+        elseif event == "CHAT_MSG_SYSTEM" then   -- our whisper bounced: unreachable for a while
             local name = bouncedName(prefix)  -- arg1 = the message text
             if name then unreach[name] = time(); publish() end
         elseif event == "CHAT_MSG_ADDON" then
@@ -770,6 +843,24 @@ function Share:Init()
         Share:JoinNet()
         C_Timer.After(3, function() requestRoster(); C_Timer.After(3, askHere) end)
     end)
+    -- at 00:00 UTC everyone moves to the new day's channel together
+    C_Timer.NewTicker(60, function()
+        local name, pw = dailyChannel()
+        if name == CHANNEL_NAME then return end
+        local old = CHANNEL_NAME
+        CHANNEL_NAME, CHANNEL_PW = name, pw
+        memberCount, roster, rosterAt, refusedAs = nil, {}, -ROSTER_EVERY, nil
+        table.insert(OLD_CHANNELS, old)   -- JoinNet leaves it (now, or once chat unlocks)
+        publish()   -- "—" until the new list is read
+        if not enabled() then
+            if (GetChannelName(old) or 0) > 0 and not chatLocked() then LeaveChannelByName(old) end
+            return
+        end
+        C_Timer.After(5 + math.random() * 3, function()   -- after VoidGather / VoidSweep move
+            Share:JoinNet()
+            C_Timer.After(3, requestRoster)
+        end)
+    end)
 end
 
 ----------------------------------------------------------------------
@@ -783,6 +874,8 @@ function Share:Stats()
         if self:Best(q) then confirmed = confirmed + 1 end
     end
     local players = self.heardFromN
+    local why = blockReason()
+    if why then VQ:Print("|cffff5555" .. why .. "|r") end
     VQ:Print(("%d other VoidQuest player%s online. Shared quest givers: %d quest%s heard about, %d confirmed by 2+ players. This session: %d message%s from %d player%s."):format(
         #roster, #roster == 1 and "" or "s",
         quests, quests == 1 and "" or "s", confirmed, self.heardMsgs, self.heardMsgs == 1 and "" or "s",
