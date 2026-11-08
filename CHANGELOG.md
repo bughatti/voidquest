@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.6 (beta)
+
+- **Fixed: clicks in the panel didn't always land.** While you quest the panel redraws often (loot, kills, quest updates), and a redraw between pressing and releasing the mouse button lost the click. The panel and My Quests now wait for you to let go before redrawing.
+
 ## 0.3.5 (beta)
 
 - **Fixed: after a /reload mid-fight the quest item buttons didn't work.** Their setup is blocked in combat; it now happens when combat ends.

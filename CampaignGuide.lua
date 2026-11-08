@@ -3999,9 +3999,34 @@ function mod:ApplyWidth()
     for _, row in ipairs(f.popupRows or {}) do row:SetWidth(cw) end
 end
 
+-- Clicks that didn't land (the user, 2026-11-07: "clicking inside the box doesn't always
+-- land"): the panel redraws up to every 0.4 s while questing (QUEST_LOG_UPDATE, bags, POIs,
+-- zone changes), and a redraw hides and re-shows its lines and buttons. One that lands
+-- between a mouse press and its release drops that click. So while a mouse button is held
+-- over the panel, the redraw waits for the release (at most 2 s, so the panel never freezes).
+local function MouseHeldOver(f)
+    return f:IsShown() and f:IsMouseOver()
+        and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) or false
+end
+
 function mod:Refresh()
-    self._stepQid = nil   -- set again below only when a guided step is shown
     local f = self:EnsurePanel()
+    if MouseHeldOver(f) and (not self._clickHoldAt or GetTime() - self._clickHoldAt < 2) then
+        if not self._clickHoldAt then
+            self._clickHoldAt = GetTime()
+            local function retry()
+                if MouseHeldOver(f) and GetTime() - self._clickHoldAt < 2 then
+                    C_Timer.After(0.05, retry)
+                    return
+                end
+                self:Refresh()
+                self._clickHoldAt = nil
+            end
+            C_Timer.After(0.05, retry)
+        end
+        return
+    end
+    self._stepQid = nil   -- set again below only when a guided step is shown
     if f._sizing then return end   -- being resized by hand: redraw once it's let go
     self:ApplyWidth()
     f.side:Hide(); f.sideBtn:Hide(); self._side = nil   -- re-shown below in step mode
@@ -4660,8 +4685,12 @@ do
         C_Timer.After(0.4, function()
             pending = false
             if VQ.Guide then
-                VQ.Guide:Refresh()
-                if VQ.Guide.qlog and VQ.Guide.qlog:IsShown() then VQ.Guide:RefreshQuestLog() end
+                VQ.Guide:Refresh()   -- waits by itself while a click is held on the panel
+                local q = VQ.Guide.qlog
+                if q and q:IsShown() then
+                    -- same for the My Quests window: never redraw under a held click
+                    if MouseHeldOver(q) then queue() else VQ.Guide:RefreshQuestLog() end
+                end
             end
         end)
     end
