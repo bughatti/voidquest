@@ -38,9 +38,18 @@ local function PanelShown(f, on)
 end
 -- In an instance (dungeon, delve, Labyrinth, raid)? Blizzard's tracker carries the
 -- M+ timer and stage objectives there, so it defaults on (see ApplyBlizzTracker).
+-- Only where the stage objectives live in Blizzard's tracker: a scenario (delves, the
+-- Labyrinth, retail dungeons). A Classic dungeon on WoW Forever has none, and bringing
+-- the tracker back there just stacked it on our panel (Shadowfang Keep, 2026-11-07).
 local function blizzTrackerNeeded()
     local inInst, instType = IsInInstance()
-    return inInst and instType ~= "none"
+    if not (inInst and instType ~= "none") then return false end
+    local S = C_Scenario
+    if S and S.IsInScenario then
+        local ok, yes = pcall(S.IsInScenario)
+        if ok then return yes and true or false end
+    end
+    return true
 end
 
 -- ===== Campaign Focus (lock to ONE campaign; strict scoping so other campaigns never

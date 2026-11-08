@@ -299,13 +299,7 @@ end
 local buttons = {}
 for i = 1, MAX do
     local b = CreateFrame("Button", i == 1 and "VoidQuestItemButton" or ("VoidQuestItemButton" .. i), UIParent, "SecureActionButtonTemplate")
-    b:SetSize(SIZE, SIZE)
-    b:RegisterForClicks("AnyUp", "AnyDown")
-    -- act on release even with "cast on key down" on -- an Up-only secure button otherwise
-    -- does nothing (see wow-secure-button-keydown-cvar)
-    b:SetAttribute("useOnKeyDown", false)
-    b:SetAttribute("type", "item")
-    b:Hide()
+    -- (size, clicks and attributes: secureSetup below, out of combat)
     b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetAllPoints()
     b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     b.border = b:CreateTexture(nil, "BACKGROUND")
@@ -319,6 +313,25 @@ for i = 1, MAX do
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
     buttons[i] = b
 end
+
+-- A secure button's size, clicks and attributes can't be set under combat lockdown, and a
+-- /reload mid-fight loads this file under it (2026-11-07: the setup was blocked and the
+-- buttons stayed dead all session). update() only runs out of combat, so it does this once.
+local secureReady
+local function secureSetup()
+    if secureReady then return end
+    secureReady = true
+    for _, b in ipairs(buttons) do
+        b:SetSize(SIZE, SIZE)
+        b:RegisterForClicks("AnyUp", "AnyDown")
+        -- act on release even with "cast on key down" on -- an Up-only secure button otherwise
+        -- does nothing (see wow-secure-button-keydown-cvar)
+        b:SetAttribute("useOnKeyDown", false)
+        b:SetAttribute("type", "item")
+        b:Hide()
+    end
+end
+if not InCombatLockdown() then secureSetup() end
 
 local function updateCooldowns()
     for _, b in ipairs(buttons) do
@@ -354,6 +367,7 @@ local pending, shownKey = false, nil
 local function update()
     if InCombatLockdown() then pending = true; return end
     pending = false
+    secureSetup()
     local panel = _G.VoidQuestGuidePanel
     local list = (panel and panel:IsShown()) and pickEntries() or {}
     local n = math.min(#list, MAX, fitCount(panel))
@@ -407,7 +421,7 @@ ev:SetScript("OnEvent", function(_, e, arg1, arg2)
     -- retail and WoW Forever send (questID); Classic Era sends (questLogIndex, questID)
     if e == "QUEST_ACCEPTED" then onQuestAccepted(type(arg2) == "number" and arg2 or arg1) end
     if e == "BAG_UPDATE_DELAYED" or e == "PLAYER_ENTERING_WORLD" then onBagsChanged() end
-    if e == "PLAYER_REGEN_ENABLED" and not pending then return end
+    if e == "PLAYER_REGEN_ENABLED" and not pending then secureSetup() return end   -- (loaded in combat)
     update()
 end)
 

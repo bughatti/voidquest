@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.5 (beta)
+
+- **Fixed: after a /reload mid-fight the quest item buttons didn't work.** Their setup is blocked in combat; it now happens when combat ends.
+- **Fixed: in a WoW Forever dungeon, Blizzard's quest tracker came back on top of the panel.** It only comes back where it holds objectives you need (delves, the Labyrinth, retail dungeons); your setting applies everywhere else.
+
 ## 0.3.4 (beta)
 
 - **Share quests quicker.** In a group, a **Share** button in the panel offers your group every quest you have that someone in it doesn't; alt-click a quest line to share just that one.
