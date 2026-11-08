@@ -2885,6 +2885,18 @@ function mod:ToggleShown()
     end
 end
 
+-- A switch in the Void hub's quick box (left-click the hub; VoidHubBundle.lua). The panel
+-- holds secure quest-item buttons, so in combat it waits for the fight to end.
+VoidHubToggles = VoidHubToggles or {}
+table.insert(VoidHubToggles, {
+    id = "VoidQuest.panel", group = "Quests", label = "Quest panel", noCombat = true,
+    tip = "VoidQuest's guide box with your next step and quests. Hiding it also drops its arrow.",
+    get = function() return VoidQuestDB and not VoidQuestDB.guideHidden end,
+    set = function(on)
+        if (not VoidQuestDB.guideHidden) ~= (on and true or false) then mod:ToggleShown() end
+    end,
+})
+
 function mod:ResetPos()
     VoidQuestDB.guidePoint = nil
     if self.frame then

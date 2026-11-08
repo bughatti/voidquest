@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.7 (beta)
+
+- **Quick switch for the quest panel:** left-click the Void hub button by your minimap and a Quick switches box opens next to the addon icons, with Quest panel on/off (also `/vquick`). In combat it switches when the fight ends.
+
 ## 0.3.6 (beta)
 
 - **Fixed: clicks in the panel didn't always land.** While you quest the panel redraws often (loot, kills, quest updates), and a redraw between pressing and releasing the mouse button lost the click. The panel and My Quests now wait for you to let go before redrawing.
