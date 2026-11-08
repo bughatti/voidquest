@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.8 (beta)
+
+- **WoW Forever: see what quest sharing is doing.** `/vq net` now also lists the sharing traffic since the counter started: questions and new quest givers sent to and received from other VoidQuest players, how often nobody else was online, and how often a question had nothing new to answer. Most quest givers already ship with the addon, so sharing is quiet by design; this shows it's working.
+
 ## 0.3.7 (beta)
 
 - **Quick switch for the quest panel:** left-click the Void hub button by your minimap and a Quick switches box opens next to the addon icons, with Quest panel on/off (also `/vquick`). In combat it switches when the fight ends.

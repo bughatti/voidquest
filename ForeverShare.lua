@@ -299,6 +299,40 @@ local function pick(k)
 end
 
 ----------------------------------------------------------------------
+-- Traffic counter (the user, 2026-11-08: "quest should be updating over the wire like
+-- gather"; nothing had ever arrived and nothing told us why). Counts by message type
+-- (N/Q/B/PING) what went out, what bounced (offline), what came in, and what never went
+-- because nobody was online, since `since`, in VoidQuestDB.netStats. /vq net prints it.
+----------------------------------------------------------------------
+-- Kept small on purpose (incoming messages are counted before they're checked): the type
+-- is the message's short uppercase prefix, a short label we pass ourselves, else "other",
+-- and each bucket holds at most TALLY_KEYS types (the rest count as "other").
+local TALLY_KEYS = 16
+local function tally(what, msg)
+    if not VoidQuestDB then return end
+    local s = VoidQuestDB.netStats
+    if not s then s = { since = time() }; VoidQuestDB.netStats = s end
+    local kind = type(msg) == "string" and (msg:match("^(%u%u?%u?%u?):") or (#msg <= 12 and not msg:find(":") and msg))
+    kind = kind or "other"
+    local b = s[what]
+    if not b then b = {}; s[what] = b end
+    if not b[kind] then
+        local n = 0
+        for _ in pairs(b) do n = n + 1 end
+        if n >= TALLY_KEYS then kind = "other" end
+    end
+    b[kind] = (b[kind] or 0) + 1
+    s["last_" .. what] = time()
+end
+-- SendAddonMessage's result: accepted (0; older clients nil/true), the player is offline
+-- (12 = TargetOffline), or refused for another reason (throttle, lockdown, ...)
+local function sendResult(result)
+    if result == nil or result == true or result == 0 then return "sent" end
+    return result == 12 and "offline" or "refused"
+end
+Share.Tally = tally
+
+----------------------------------------------------------------------
 -- Outgoing: addon whispers, one every SEND_EVERY seconds (the server throttles addon
 -- traffic, so we never burst)
 ----------------------------------------------------------------------
@@ -312,6 +346,7 @@ local function pump()
         local key, at = item.to:lower(), time()
         whispered[key] = GetTime()   -- bounce matching (HIDE_FOR) runs on GetTime
         local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
+        tally(sendResult(result), item.msg)
         -- Enum.SendAddonMessageResult: 0 = Success, 12 = TargetOffline (older clients: nil/true).
         -- Only a send the game accepted can prove a marked player is back.
         if result == 12 then
@@ -371,6 +406,7 @@ local function flush()
     if #due > 0 then
         requestRoster()
         local targets = pick(FANOUT)
+        if #targets == 0 then tally("nobody", "N") end
         if #targets > 0 and #queue <= QUEUE_MAX / 2 then
             local byMap = {}
             for _, q in ipairs(due) do
@@ -407,9 +443,11 @@ function Share:Ask(mapID)
     if not (enabled() and mapID) then return end
     if lastQuery[mapID] and GetTime() - lastQuery[mapID] < QUERY_CD then return end
     requestRoster()
-    if #roster == 0 then return end   -- nobody to ask yet; try again on the next zone change
+    -- nobody to ask yet (none online, or all known to be offline): try again on the next zone change
+    local targets = pick(ASK_PEERS)
+    if #targets == 0 then tally("nobody", "Q"); return end
     lastQuery[mapID] = GetTime()
-    for _, to in ipairs(pick(ASK_PEERS)) do send(("Q:%s:%d"):format(PROTO, mapID), to) end
+    for _, to in ipairs(targets) do send(("Q:%s:%d"):format(PROTO, mapID), to) end
 end
 
 local function ownOn(mapID)
@@ -541,11 +579,12 @@ function Share:OnMessage(msg, sender, replyTo)
         return
     end
     if not enabled() or sender == me or not VoidQuestDB then return end
-    if not rateOK(sender) then return end
+    tally("got", msg)
+    if not rateOK(sender) then tally("dropped", "rate"); return end
     local tag, proto, mapS, body = msg:match("^(%a):(%d+):(%d+):?(.*)$")
-    if proto ~= PROTO then return end
+    if proto ~= PROTO then tally("dropped", "proto"); return end
     local mapID = tonumber(mapS)
-    if not validMap(mapID) then return end
+    if not validMap(mapID) then tally("dropped", "map"); return end
     Share.heardMsgs = Share.heardMsgs + 1
     local h = senderHash(sender)
     if not Share.heardFrom[h] and Share.heardFromN < HEARD_FROM_MAX then
@@ -562,7 +601,7 @@ function Share:OnMessage(msg, sender, replyTo)
         -- queue and crowd out your own finds
         if lastAnyReply and now - lastAnyReply < ANSWER_EVERY then return end
         local own = ownOn(mapID)
-        if #own == 0 or not replyTo then return end
+        if #own == 0 or not replyTo then tally("unanswered", "nothing new"); return end
         lastReply[key], lastReplyTo[sender], lastAnyReply = now, now, now
         local gen = Share.gen
         C_Timer.After(1 + math.random() * 3, function()
@@ -748,6 +787,19 @@ function Share:Stats()
         #roster, #roster == 1 and "" or "s",
         quests, quests == 1 and "" or "s", confirmed, self.heardMsgs, self.heardMsgs == 1 and "" or "s",
         players, players == 1 and "" or "s"))
+    -- the traffic counter since it started (all sessions)
+    local s = VoidQuestDB and VoidQuestDB.netStats
+    if s then
+        local function list(t)
+            local out = {}
+            for k, v in pairs(t or {}) do out[#out + 1] = k .. " " .. v end
+            table.sort(out)
+            return #out > 0 and table.concat(out, ", ") or "none"
+        end
+        VQ:Print(("Traffic since %s -- sent: %s | received: %s | not sent, nobody online: %s | offline: %s | refused: %s | dropped: %s | questions with nothing new to answer: %s"):format(
+            date("%b %d %H:%M", s.since), list(s.sent), list(s.got), list(s.nobody), list(s.offline), list(s.refused),
+            list(s.dropped), list(s.unanswered)))
+    end
 end
 
 function Share:SelfTest()
