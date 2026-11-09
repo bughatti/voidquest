@@ -1,6 +1,10 @@
 # VoidQuest
 
-**A quest guide that reads the game live: your campaign, your zone, and the quest nearest to you, on retail and WoW Forever.**
+**Works on:** WoW Midnight · WoW Forever
+
+> **WoW Forever players: please update to the latest version.** Versions from before November 8, 2026 use the old sharing channels, so they can't share with current players and aren't counted in the Players online box. The CurseForge app updates it for you; if you installed by hand, download the newest file.
+
+**A quest guide that reads the game live: your campaign, your zone, and the quest nearest to you, on Midnight and WoW Forever.**
 
 VoidQuest shows one small panel with the next thing to do and pins it on your map. It builds its steps from the game itself (campaigns, quest lines, your quest log), so it covers new content on day one instead of waiting for a hand-written guide. On WoW Forever, where the map shows no quest givers, it ships with thousands of quest givers, turn-ins and quest chains (from NorgannonDB, see Credits) and fills the rest in as you and other VoidQuest players play. **Beta:** expect rough edges and tell us on Discord.
 
@@ -111,7 +115,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 
 ## Compatibility
 
-- **WoW 12.1** (Midnight) and **WoW Forever**
+- **WoW Midnight** 12.1.5 (Season 2)
+- **WoW Forever**
 - Works with VoidGather and VoidSweep (shared players online box), and with the rest of the Void addons.
 
 ---
