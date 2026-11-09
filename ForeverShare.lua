@@ -234,7 +234,8 @@ local memberCount
 -- timed-out mark made logged-off players count as online again every 30 min, so the
 -- players box popped up and down (live 11-07). After UNREACH_FOR, X may be picked again,
 -- which is how we find out they're back.
--- Marks are SAVED (VoidQuestDB.netOffline, set in Share:Init) and timed with time(): kept
+-- Marks were SAVED (VoidQuestDB.netOffline) until 2026-11-09; now this session only (the user:
+-- "get rid of the offline list"). They are timed with time(). When they were kept
 -- only in memory, every /reload counted logged-off members as online again until their
 -- next bounce (live 11-07).
 local UNREACH_FOR = 1800   -- a marked player may be whispered again after this
@@ -783,10 +784,11 @@ function Share:Init()
     -- channels survive a /reload: yesterday's goes too (reload across 00:00 UTC, Codex)
     table.insert(OLD_CHANNELS, (dailyChannel(today - 1)))
     me = canon(GetUnitName and GetUnitName("player") or UnitName("player"))
-    -- offline marks saved per account, so a /reload doesn't count logged-off players
+    -- offline marks: this session only, never saved (the user, 2026-11-09: "get rid of the offline
+    -- list"); the old saved list is deleted
     VoidQuestDB = VoidQuestDB or {}
-    VoidQuestDB.netOffline = VoidQuestDB.netOffline or {}
-    unreach = VoidQuestDB.netOffline
+    VoidQuestDB.netOffline = nil
+    unreach = {}
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     end

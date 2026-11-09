@@ -332,6 +332,7 @@ local KNOWN_VOID_ADDONS = {
     { name = "VoidGather",     label = "Gathering",         public = true, desc = "Every mining, herb, skinning and lumber spot on your map, shared with other players, plus what your gathering is worth per hour." },
     { name = "VoidGear",       label = "Gear Planner",      public = true, desc = "What the top Mythic+ players of your spec wear, your upgrades, and where your crests should go." },
     { name = "VoidGPS",        label = "GPS",               desc = "Type a place, an NPC, a service or a party member: a route along walked paths, flight paths and zeppelins, through zones." },
+    { name = "VoidLayer",      label = "Layers",            public = true, desc = "WoW Forever: see your layer, hop to another with one click, and rares up on other layers." },
     { name = "VoidLFG",        label = "Group Finder",      desc = "Enhanced LFG dialog with party history and quality filters." },
     { name = "VoidMap",        label = "World Map",         desc = "The world map in a Void window: same navigation, filters and pins, your quests beside it." },
     { name = "VoidPlates",     label = "Nameplates",        public = true, desc = "Clean, readable enemy nameplates: who is casting, what to kick and who it is aimed at." },

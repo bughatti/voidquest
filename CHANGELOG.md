@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.13
+
+- **Nothing about other players is saved any more:** the short list of players who had just logged off (it kept the online count right after a reload) now lasts only for your session, and the old saved list is deleted.
+
 ## 0.3.12
 
 - **The way there, for quests in another zone (with VoidGPS):** hover a quest and its tooltip shows how to get to its next stop (the turn-in NPC, the giver or the objective), step by step, for example "1. Fly to Orgrimmar (from Camp Taurajo) 2. Take the zeppelin outside Orgrimmar to Grom'gol 3. Walk 832 yd to Hemet Nesingwary". **Shift-click** the quest and VoidGPS guides you leg by leg. The step at the top of the panel gets a "Way there" line too; click it to be guided.
