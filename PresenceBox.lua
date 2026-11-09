@@ -62,7 +62,7 @@ local function TITLE() return FOREVER() and "Players online" or "Players here" e
 -- is restored as it loads, so the last to load would win even if it was
 -- disabled last session and holds old settings. Each change is stamped, and as
 -- each addon loads the newest copy is kept.
-local HOSTS = { VoidGather = true, VoidSweep = true, VoidQuest = true }   -- addons that carry this file
+local HOSTS = { VoidGather = true, VoidSweep = true, VoidQuest = true, VoidLayer = true }   -- addons that carry this file
 local newest
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")

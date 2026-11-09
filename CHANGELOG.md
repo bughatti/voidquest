@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.12
+
+- **The way there, for quests in another zone (with VoidGPS):** hover a quest and its tooltip shows how to get to its next stop (the turn-in NPC, the giver or the objective), step by step, for example "1. Fly to Orgrimmar (from Camp Taurajo) 2. Take the zeppelin outside Orgrimmar to Grom'gol 3. Walk 832 yd to Hemet Nesingwary". **Shift-click** the quest and VoidGPS guides you leg by leg. The step at the top of the panel gets a "Way there" line too; click it to be guided.
+- **Quests ready to turn in say so first:** a green **Turn in:** in front of the name. At the end of the line it was the first thing cut off on a long line, so it was hard to see which quest was done.
+
 ## 0.3.11
 
 - **Fixed: the step you're on now shows its details on hover.** The top line of the panel (and its objective line under it) only said "Click: set a map pin". It now shows the same tooltip as the quest lines below: what to do, the story, your progress on each objective, the quest level and who in your group has it.

@@ -20,6 +20,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Zones and Dungeons tabs** (WoW Forever) — your zone's quests on one tab, dungeon quests on the other, grouped under each dungeon's name.
 - **Click a line to track that quest** — your choice holds until you reach it or clear it. VoidQuest never takes over an arrow you set yourself.
 - **Hover to read, right-click to open** — hovering a quest line shows what to do and the start of its story; right-click opens the whole quest in your quest log.
+- **Ready to turn in, first** — a quest that's done starts its line with a green **Turn in:**, so you see it even when the line is long.
+- **The way there** (with **VoidGPS**) — for a quest in another zone, the tooltip lists the steps to its next stop: "1. Fly to Orgrimmar (from Camp Taurajo) 2. Take the zeppelin outside Orgrimmar to Grom'gol 3. Walk 832 yd to Hemet Nesingwary". **Shift-click** the quest and VoidGPS guides you there.
 - **Coloured by level** — quest lines use the quest log's colours: gray (far below you), green, yellow (your level), orange, red (too high for now).
 - **Who in your group is on it** — a small blue badge at the right of a line counts the group members on that quest too; hover for their names.
 - **Quest items, one click** — when a quest needs you to use an item ("fire the flare gun", "use the totem"), its button sits beside the panel while you're near that quest, closest quest on top, and goes away when you leave. On WoW Forever most quests never tell the game which item is theirs, so VoidQuest works it out: the item a quest hands you when you accept it, else an item the quest's text names. `/vq items` shows what it found.

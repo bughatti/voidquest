@@ -2716,6 +2716,8 @@ function mod:EnsurePanel()
 
     -- click the STEP or OBJECTIVE line to (re)pin its waypoint -- "take me there"
     local function pinClick()
+        -- shift: VoidGPS guides you there instead (the tooltip says so when it's in another zone)
+        if IsShiftKeyDown() and mod:GuideToQuest(mod._stepQid) then return end
         mod:TakeTrack(); mod._sidePin = nil
         -- lock the arrow to THIS quest until it's turned in / dropped (see Waypoint, Resolve)
         mod._pinLock = mod._stepQid and { qid = mod._stepQid, step = mod._shownStep } or nil
@@ -2788,6 +2790,10 @@ function mod:EnsurePanel()
         "An activity quest: the dungeons, delves or world quests it asks for only count after you pick it up. Grab it before you run them.", "_meta")
     f.big, f.bigBtn = extraLine("Click: pin this quest's giver",
         "Worth 3+ normal quests at your level -- worth the trip from another zone.", "_big")
+    -- the way to the step when it's in another zone (VoidGPS): click = guide me there
+    f.way, f.wayBtn = extraLine("Click: guide me there",
+        "VoidGPS leads you leg by leg: the flight paths, zeppelins and boats to take, then the path to walk.", "_way")
+    f.wayBtn:SetScript("OnClick", function() mod:GuideToQuest(mod._stepQid) end)
 
     f.questRows = {}   -- pool for the "all current quests" list (quest-only mode)
     f.popupRows = {}   -- pool for auto-quest OFFER/COMPLETE alert rows
@@ -3487,11 +3493,83 @@ local function SetLineParty(holder, fs, n)
 end
 local function SetRowParty(row, n) SetLineParty(row, row.text, n) end
 
+-- The way to a quest's next stop in another zone, through VoidGPS (the user, 2026-11-09: "i have
+-- a quest to turn in near grom gol, yet i dont know how to get there, im in camp t so somewhere it
+-- telling me the path to take would be great"). Nothing without VoidGPS.
+local function gps() return VoidGPS and VoidGPS.DescribeRoute and VoidGPS.RouteTo and VoidGPS or nil end
+
+local function zoneOfMap(m)   -- a map rolled up to its zone (caves, floors, cities stay themselves)
+    local info = m and safe(C_Map.GetMapInfo, m)
+    local zoneType = Enum.UIMapType and Enum.UIMapType.Zone or 3
+    while info and info.mapType and info.mapType > zoneType and info.parentMapID and info.parentMapID > 0 do
+        m = info.parentMapID
+        info = safe(C_Map.GetMapInfo, m)
+    end
+    return m, info
+end
+
+-- Where the quest takes you next: { name, map, x, y (0-1), why } or nil.
+local function QuestTarget(qid)
+    if not qid then return nil end
+    -- ready to turn in: the turn-in NPC, where VoidGPS knows them
+    if safe(C_QuestLog.IsComplete, qid) and VQ.Starts and gps() and VoidGPS.FindNPC then
+        local who = VQ.Starts:Turnin(qid)
+        local at = who and VoidGPS:FindNPC(who)
+        if at then at.why = "turn in to " .. who; return at end
+    end
+    -- not picked up yet: its giver
+    if not safe(C_QuestLog.GetLogIndexForQuestID, qid) then
+        local s = VQ.Starts and VQ.Starts:Get(qid)
+        if s and s.m and s.x and s.y and s.x > 0 then
+            local who = VQ.Starts:Giver(qid)
+            return { name = who or "the giver", map = s.m, x = s.x, y = s.y, why = "pick up" .. (who and (" from " .. who) or "") }
+        end
+    end
+    -- the game's own next stop (objective area or turn-in)
+    local m, x, y = safe(C_QuestLog.GetNextWaypoint, qid)
+    if m and m > 0 and x and y and x > 0 and y > 0 then return { name = "the next step", map = m, x = x, y = y, why = "next step" } end
+end
+
+-- "fly Camp Taurajo → Orgrimmar → zeppelin to Grom'gol (Orgrimmar) → walk 300 yd", seconds, target, zone name;
+-- nil when the quest's next stop is in this zone (or unknown, or no VoidGPS)
+local function QuestWay(qid)
+    if not gps() then return nil end
+    local t = QuestTarget(qid)
+    if not t then return nil end
+    local here = zoneOfMap(safe(C_Map.GetBestMapForUnit, "player"))
+    local there, info = zoneOfMap(t.map)
+    if not here or here == there then return nil end
+    local ok, text, secs, steps = pcall(VoidGPS.DescribeRoute, VoidGPS, t)
+    if not (ok and text) then return nil end
+    return text, secs, t, info and info.name, steps
+end
+local function minutes(secs) return (secs and secs > 90) and (" (~%d min)"):format(math.floor(secs / 60 + 0.5)) or "" end
+
+-- Start VoidGPS's guide to the quest's next stop. True if it started.
+function mod:GuideToQuest(qid)
+    local t = gps() and QuestTarget(qid)
+    if not t then return false end
+    local title = safe(C_QuestLog.GetTitleForQuestID, qid) or ("quest " .. tostring(qid))
+    return VoidGPS:RouteTo({ name = title, sub = t.why, map = t.map, x = t.x, y = t.y }) and true or false
+end
+
 -- A quest's tooltip plus who in your group is on it.
 local function QuestTipWithGroup(qid, zone, groupNames, clickHint)
     local base = QuestTip(qid, zone, clickHint)
     return function(s)
         base(s)
+        -- in another zone: the way there (VoidGPS), and shift-click to be guided
+        local way, secs, t, zname, steps = QuestWay(qid)
+        if way then
+            -- one numbered step per line (the user, 2026-11-09: the one-line route was confusing)
+            GameTooltip:AddLine(("Way there%s (%s%s):"):format(minutes(secs), t.why, zname and (", " .. zname) or ""), .53, .8, 1, true)
+            if type(steps) == "table" and #steps > 0 then
+                for i, s in ipairs(steps) do GameTooltip:AddLine(("%d. %s"):format(i, s), 1, 1, 1, true) end
+            else
+                GameTooltip:AddLine(way, 1, 1, 1, true)
+            end
+            GameTooltip:AddLine("Shift-click: guide me there (VoidGPS)", .6, .6, .6)
+        end
         local _, lvl = LevelColor(qid)
         if lvl then GameTooltip:AddLine(("Quest level %d (you: %d)"):format(lvl, UnitLevel("player") or 0), .7, .7, .7) end
         if groupNames then
@@ -3510,6 +3588,13 @@ end
 -- below it"). The panel is built above this point in the file, so it calls in through mod.
 function mod:StepTooltip(s, qid)
     QuestTipWithGroup(qid, nil, nil, "Click: set a map pin for this step")(s)
+end
+
+-- The "Way there" line under the guided step (render code below calls this)
+function mod:StepWayText(qid)
+    local way, secs = QuestWay(qid)
+    if not way then return nil end
+    return ("|cff88ccffWay there:|r %s%s |cff888888- click: guide me|r"):format(way, minutes(secs))
 end
 
 function mod:RenderQuestBlock(f, anchor, fit, skip)
@@ -3558,14 +3643,19 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
                 or (e.zone and (" |cff888888[%s]|r"):format(e.zone)) or ""
             -- grey quests that matter: a yellow star in front (Chains.lua); no star = abandon
             local star = (VQ.Chains and not e.kind) and VQ.Chains:Star(qid) or ""
-            local sum = ObjSummary(qid)
-            text = ("%s%s|cff%s%s|r%s%s"):format(mark, star, (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
+            -- ready to turn in: say so FIRST. At the end it was the first thing cut off on a long
+            -- line ("Hunting in Stranglethorn [Stranglethorn Vale]: t...", the user 2026-11-09)
+            local done = safe(C_QuestLog.IsComplete, qid)
+            local sum = done and "" or ObjSummary(qid)
+            text = ("%s%s%s|cff%s%s|r%s%s"):format(mark, star, done and "|cff55ff55Turn in:|r " or "",
+                (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
                 sum ~= "" and ("|cffaaaaaa: %s|r"):format(sum) or "")
             local nGroup, groupNames = GroupOnQuest(qid)
             row.tip = QuestTipWithGroup(qid, e.zone, groupNames)
             row.partyN = nGroup
             row:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
-                if IsAltKeyDown() then ShareQuest(qid)
+                if IsShiftKeyDown() and mod:GuideToQuest(qid) then   -- shift: VoidGPS guides you to its next stop
+                elseif IsAltKeyDown() then ShareQuest(qid)
                 elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
             end)
         end
@@ -3860,7 +3950,8 @@ function mod:RenderQuestList(f, popH)
         row.bar:ClearAllPoints(); row.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, top - (ri - 1) * ROWH - 14)
         SetProgress(row.bar, pct)
         row.btn:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
-            if IsAltKeyDown() then ShareQuest(qid)
+            if IsShiftKeyDown() and mod:GuideToQuest(qid) then   -- shift: VoidGPS guides you to its next stop
+            elseif IsAltKeyDown() then ShareQuest(qid)
             elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
         end)
         local nGroup, groupNames = GroupOnQuest(qid)
@@ -4059,6 +4150,7 @@ function mod:Refresh()
     f.side:Hide(); f.sideBtn:Hide(); self._side = nil   -- re-shown below in step mode
     f.big:Hide(); f.bigBtn:Hide(); self._big = nil
     f.meta:Hide(); f.metaBtn:Hide(); self._meta = nil
+    if f.way then f.way:Hide(); f.wayBtn:Hide() end
     -- a side-quest pin did its job once that quest is picked up: back to the main step's pin
     if self._sidePin and (safe(C_QuestLog.GetLogIndexForQuestID, self._sidePin)
        or safe(C_QuestLog.IsQuestFlaggedCompleted, self._sidePin)) then
@@ -4300,6 +4392,9 @@ function mod:Refresh()
         -- an activity ("meta") quest not picked up yet: its activities only count once it's
         -- in your log, so it goes first, any density (2026-10-26: a Labyrinth run and world
         -- quests done before "Hope in the Darkest Corners" counted for nothing)
+        -- the way to the step when it's in another zone (VoidGPS): first, it's about the step itself
+        local wayText = self:StepWayText(step.qid)
+        if wayText then extra(f.way, f.wayBtn, wayText) end
         local meta = self:MetaOffer()
         if meta and meta.qid ~= step.qid then
             self._meta = meta
