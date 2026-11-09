@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.10
+
+- **Fixed: box borders missing a side.** Depending on where a window sat on screen, its left, right or bottom line could vanish. Borders are now exactly one screen pixel and can't round away.
+
 ## 0.3.9 (beta)
 
 - **WoW Forever: quest sharing moved to a new password-protected channel, a fresh one every day.** The old channel was open: anyone could join it by hand, become its owner and ban players, and a banned player's sharing silently stopped (the players box showed "—"). Now every VoidQuest player joins that day's channel with its password, and at 00:00 UTC everyone moves to the next one together, so even if someone gets in, it only lasts until the next day. Players on older versions still get whispers but aren't counted until they update.

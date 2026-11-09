@@ -1,4 +1,31 @@
 -- VoidSpy hook: enable with /vspy enable VoidQuest  (no-op if VoidSpy missing/disabled)
+-- Borders are one screen pixel (tools/cmd/pixelfix, 2026-11-09). WoW snaps each border
+-- piece to the pixel grid, and a thin line on a fractional position can snap to 0 px: a side
+-- of a box vanishes. VoidPX() asks for one real pixel, and the hook below (installed once, by
+-- the first Void addon loaded) turns snapping off on the edges of flat WHITE8X8 borders, like
+-- Blizzard's NineSliceUtil.DisableSharpening, so a 1 px line always covers a pixel.
+local function VoidPX()
+    local s = UIParent and UIParent:GetEffectiveScale()
+    if s and s > 0 and PixelUtil and PixelUtil.GetPixelToUIUnitFactor then return PixelUtil.GetPixelToUIUnitFactor() / s end
+    return 1
+end
+if not _G.__VoidBorderHook and hooksecurefunc and NineSliceUtil and NineSliceUtil.ApplyLayout then
+    _G.__VoidBorderHook = true
+    local EDGES = { "TopEdge", "BottomEdge", "LeftEdge", "RightEdge",
+                    "TopLeftCorner", "TopRightCorner", "BottomLeftCorner", "BottomRightCorner" }
+    hooksecurefunc(NineSliceUtil, "ApplyLayout", function(c)
+        local i = type(c) == "table" and c.backdropInfo
+        local e = i and i.edgeFile
+        if type(e) ~= "string" or not e:lower():find("white8x8", 1, true) or (tonumber(i.edgeSize) or 0) > 3 then return end
+        for _, k in ipairs(EDGES) do
+            local t = c[k]
+            if t and t.SetSnapToPixelGrid then
+                t:SetSnapToPixelGrid(false)
+                t:SetTexelSnappingBias(0)
+            end
+        end
+    end)
+end
 local function dbg(fmt, ...) if VoidSpy and VoidSpy.Log then VoidSpy:Log("VoidQuest", fmt, ...) end end
 
 ----------------------------------------------------------------------
@@ -54,7 +81,7 @@ function VQ:CreateBackdrop(frame, alpha)
     frame:SetBackdrop({
         bgFile   = VQ.texture,
         edgeFile = VQ.texture,
-        edgeSize = 1,
+        edgeSize = VoidPX(),
     })
     frame:SetBackdropColor(self.palette.bg[1], self.palette.bg[2], self.palette.bg[3], alpha)
     frame:SetBackdropBorderColor(self.palette.accent[1], self.palette.accent[2], self.palette.accent[3], 0.5)
