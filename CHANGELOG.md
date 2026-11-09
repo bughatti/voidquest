@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.11
+
+- **Fixed: the step you're on now shows its details on hover.** The top line of the panel (and its objective line under it) only said "Click: set a map pin". It now shows the same tooltip as the quest lines below: what to do, the story, your progress on each objective, the quest level and who in your group has it.
+
 ## 0.3.10
 
 - **Fixed: box borders missing a side.** Depending on where a window sat on screen, its left, right or bottom line could vanish. Borders are now exactly one screen pixel and can't round away.

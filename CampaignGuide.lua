@@ -2731,6 +2731,8 @@ function mod:EnsurePanel()
         end
     end
     local function pinEnter(s)
+        local qid = mod._stepQid
+        if qid and mod.StepTooltip then mod:StepTooltip(s, qid) return end
         GameTooltip:SetOwner(s, "ANCHOR_LEFT")
         GameTooltip:SetText("Click: set a map pin for this step")
         GameTooltip:Show()
@@ -3301,7 +3303,9 @@ local function QuestText(qid)
     return story ~= "" and story or nil, todo ~= "" and todo or nil
 end
 
-local function QuestTip(qid, zone)
+-- clickHint: what a click does on THIS line, in place of the quest-row hints (the step line
+-- sets a map pin instead of tracking)
+local function QuestTip(qid, zone, clickHint)
     return function(s)
         GameTooltip:SetOwner(s, "ANCHOR_LEFT")
         GameTooltip:SetText(safe(C_QuestLog.GetTitleForQuestID, qid) or ("quest " .. qid))
@@ -3322,9 +3326,13 @@ local function QuestTip(qid, zone)
                 end
             end
         end
-        GameTooltip:AddLine("Left-click: track it (arrow); again to stop.", .6, .6, .6)
-        GameTooltip:AddLine("Right-click: open the whole quest.", .6, .6, .6)
-        if IsInGroup and IsInGroup() then GameTooltip:AddLine("Alt-click: share it with your group.", .6, .6, .6) end
+        if clickHint then
+            GameTooltip:AddLine(clickHint, .6, .6, .6)
+        else
+            GameTooltip:AddLine("Left-click: track it (arrow); again to stop.", .6, .6, .6)
+            GameTooltip:AddLine("Right-click: open the whole quest.", .6, .6, .6)
+            if IsInGroup and IsInGroup() then GameTooltip:AddLine("Alt-click: share it with your group.", .6, .6, .6) end
+        end
         GameTooltip:Show()
     end
 end
@@ -3480,8 +3488,8 @@ end
 local function SetRowParty(row, n) SetLineParty(row, row.text, n) end
 
 -- A quest's tooltip plus who in your group is on it.
-local function QuestTipWithGroup(qid, zone, groupNames)
-    local base = QuestTip(qid, zone)
+local function QuestTipWithGroup(qid, zone, groupNames, clickHint)
+    local base = QuestTip(qid, zone, clickHint)
     return function(s)
         base(s)
         local _, lvl = LevelColor(qid)
@@ -3495,6 +3503,13 @@ local function QuestTipWithGroup(qid, zone, groupNames)
         if VQ.Chains then VQ.Chains:AddTooltip(GameTooltip, qid) end
         GameTooltip:Show()   -- resize for the added lines
     end
+end
+
+-- The guided step's lines at the top of the panel: the same quest details as the rows below
+-- (the user, 2026-11-09: "if i hover over it it doesnt show the details like all the ones
+-- below it"). The panel is built above this point in the file, so it calls in through mod.
+function mod:StepTooltip(s, qid)
+    QuestTipWithGroup(qid, nil, nil, "Click: set a map pin for this step")(s)
 end
 
 function mod:RenderQuestBlock(f, anchor, fit, skip)
