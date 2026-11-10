@@ -14,6 +14,7 @@
 -- Data: ForeverMobs.lua (tools/cmd/forever-mobs, from NorgannonDB, which reads WoW
 -- Forever's own tables). /vq dots turns them off.
 ----------------------------------------------------------------------
+local _, ns = ...   -- the addon's own table: MinimapHover.lua lives there
 local VQ = VoidQuest
 if not VQ or not VQ.ForeverMobs then return end   -- WoW Forever only
 
@@ -447,12 +448,18 @@ local function QuestIDByTitle(title)
     end
 end
 
--- 3: remember where you saw it (your own position: its nameplate is up, so it's near)
-local function Learn(npc, name, quests)
-    local map = C_Map.GetBestMapForUnit("player")
-    local pos = map and C_Map.GetPlayerMapPosition(map, "player")
-    if not pos then return end
-    local x, y = pos:GetXY()
+-- 3: remember where you saw it. atMap/atX/atY (0..1) = where the MOB is, when known
+-- (triangulated from its nameplate, or the minimap dot you pointed at); else where you stand
+-- (its nameplate is up, so it's near).
+local function Learn(npc, name, quests, atMap, atX, atY)
+    local map, x, y = atMap, atX, atY
+    if not (map and x and y) then
+        map = C_Map.GetBestMapForUnit("player")
+        local pos = map and C_Map.GetPlayerMapPosition(map, "player")
+        if not pos then return end
+        x, y = pos:GetXY()
+    end
+    if not (x and y) then return end
     x, y = math.floor(x * 1000 + 0.5), math.floor(y * 1000 + 0.5)
     if x <= 0 or y <= 0 or x > 999 or y > 999 then return end
     VoidQuestDB = VoidQuestDB or {}
@@ -493,6 +500,104 @@ local function Learn(npc, name, quests)
     end
 end
 
+----------------------------------------------------------------------
+-- (Triangulating a mob from two sightings was tried here, 2026-11-10, and taken out the same
+-- day: it needs the nameplate's place on screen, and on WoW Forever a nameplate can't be measured
+-- -- GetCenter() fails "Can't measure restricted regions" and taints the addon.)
+--
+-- The CLOSEST moment instead (2026-11-10, VoidDev RangeProbe: 74 readings on Barrens mobs): range
+-- checks DO answer for hostile mobs out of combat -- CheckInteractDistance(unit, 2) ~10 yd, an
+-- item of known range (Gnomish Death Ray, 20 yd), CheckInteractDistance(unit, 1) ~28 yd. So while
+-- a quest mob's nameplate is up, every look notes how near it is and where you stand; the spot
+-- learned is where you were CLOSEST (within 10 yd when you rode past it), not where its nameplate
+-- first showed (40+ yd off). Settled when its nameplate goes, or after 30 s. In combat nothing
+-- is checked (you're fighting it: you're next to it anyway).
+----------------------------------------------------------------------
+local NEAR_FOR = 30
+local RANGE_ITEM_20 = 10645   -- Gnomish Death Ray: 20 yd against hostile units (Classic item)
+local near = {}   -- [guid] = { npc, name, quests, map, x, y, d, t0 }
+
+local function HowNear(unit)
+    if InCombatLockdown() then return nil end
+    local ok, r = pcall(CheckInteractDistance, unit, 2)
+    if ok and r == true then return 10 end
+    ok, r = pcall(C_Item.IsItemInRange, RANGE_ITEM_20, unit)
+    if ok and r == true then return 20 end
+    ok, r = pcall(CheckInteractDistance, unit, 1)
+    if ok and r == true then return 28 end
+    return 60   -- nameplate range
+end
+
+-- learn the best spot once; the entry stays (learned) until the nameplate goes or 30 s pass, so a
+-- later, farther look can't start over and replace it (Sol review)
+local function LearnBest(s)
+    if s.learned then return end
+    s.learned = true
+    Learn(s.npc, s.name, s.quests, s.map, s.x, s.y)
+end
+local function Settle(guid)
+    local s = near[guid]
+    if not s then return end
+    near[guid] = nil
+    LearnBest(s)
+end
+
+local function Sight(unit, npc, name, quests)
+    local guid = UnitGUID(unit)
+    local map = C_Map.GetBestMapForUnit("player")
+    local pos = map and C_Map.GetPlayerMapPosition(map, "player")
+    if not (guid and not secret(guid) and pos) then Learn(npc, name, quests) return end
+    local x, y = pos:GetXY()
+    local d = HowNear(unit) or 60
+    local s = near[guid]
+    if s and (s.map ~= map or GetTime() - s.t0 > NEAR_FOR) then Settle(guid); s = nil end
+    if not s then
+        s = { npc = npc, name = name, quests = quests, map = map, x = x, y = y, d = d, t0 = GetTime() }
+        near[guid] = s
+    else
+        if s.learned then return end                    -- its best spot is learned already
+        if quests then s.quests = quests end
+        if d < s.d then s.x, s.y, s.d = x, y, d end     -- nearer: this is the spot
+    end
+    if s.d <= 10 then LearnBest(s) end                  -- can't get better: learn it now
+end
+
+local function SettleUnit(unit)
+    local guid = unit and UnitGUID(unit)
+    if guid and not secret(guid) then Settle(guid) end
+end
+C_Timer.NewTicker(5, function()
+    local now = GetTime()
+    for guid, s in pairs(near) do if now - s.t0 > NEAR_FOR then Settle(guid) end end
+end)
+----------------------------------------------------------------------
+-- Exact mob spots also come from minimap dots you point at, below.
+----------------------------------------------------------------------
+-- A tracked mob's dot you point at on the minimap (hunters: Track Beasts / Humanoids; druids):
+-- its exact spot (MinimapHover.lua). Only a name that's ONE quest mob in our data.
+local byName
+local function QuestMobByName(n)
+    if not byName then
+        byName = {}
+        for key, mobName in pairs(VQ.ForeverMobNames or {}) do
+            local id = tonumber(key:match("^n(%d+)$"))
+            if id and IsQuestMob(id) then
+                if byName[mobName] == nil then byName[mobName] = id else byName[mobName] = false end
+            end
+        end
+    end
+    return byName[n] or nil
+end
+if ns and ns.MinimapHover then
+    ns.MinimapHover:Listen(function(names, map, x, y)
+        if not Enabled() then return end
+        for _, n in ipairs(names) do
+            local npc = QuestMobByName(n)
+            if npc then Learn(npc, n, nil, map, x, y) end
+        end
+    end)
+end
+
 -- (inView, the mobs in view, is declared near the top)
 
 -- (A text line "In view: 3 ..." by the minimap was here; the user, 2026-11-10: "i dont like the
@@ -525,18 +630,19 @@ local function Mark(unit)
         icon:Show()
         inView[unit] = { name = name or "?", quests = quests, rare = rare }
         local npc = NpcID(unit)
-        if npc and name then Learn(npc, name, quests) end
+        if npc and name then Sight(unit, npc, name, quests) end
     else
         if icon then icon:Hide() end
         inView[unit] = nil
         -- a quest mob for a quest you've done / don't have (the user, 2026-11-10: "what about
         -- quests i already did"): no icon, but where it is helps everyone still on that quest
         local npc = NpcID(unit)
-        if npc and name and IsQuestMob(npc) then Learn(npc, name, nil) end
+        if npc and name and IsQuestMob(npc) then Sight(unit, npc, name, nil) end
     end
 end
 
 local function Unmark(unit)
+    pcall(SettleUnit, unit)   -- gone from view: learn its closest spot
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
     if plate and plate.voidQuestMark then plate.voidQuestMark:Hide() end
     inView[unit] = nil

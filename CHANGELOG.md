@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.3.21
+
+### WoW Forever: quest-mob spots, closer
+- **The spot is where you got closest to the mob.** While a quest mob's nameplate is up, VoidQuest checks how near it is with the game's own range checks (about 10, 20 and 28 yards) and keeps the spot where you were closest: within 10 yards when you ride past, instead of where its nameplate first showed up 40+ yards away.
+- **Hunters and druids:** point at a tracked mob's dot on the minimap (Track Beasts / Humanoids) and that quest mob's exact spot is saved.
+
 ## 0.3.20
 
 ### WoW Forever: quest-mob spots, shared
