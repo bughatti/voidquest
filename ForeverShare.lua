@@ -617,6 +617,232 @@ local function takeEntries(mapID, body, sender)
     if changed then scheduleRefresh() end
 end
 
+----------------------------------------------------------------------
+-- Quest facts (the user, 2026-11-09: "we need to be collecting as much of this data as
+-- possible to validate or add to ... this is something that should be sent over the
+-- voidquest channel"). What the game itself shows and pays, where it differs from what
+-- VoidQuest ships (Blizzard's quest API has no rewards for many quests: A Vengeful Fate
+-- offers four, the API lists none):
+--   F:1:questID:i=id.id.id   the reward + choice items the quest window shows (sorted)
+--   F:1:questID:p=fid.amt.fid.amt   reputation the turn-in really paid (from chat)
+-- 20-60 bytes, sent only when it differs from the shipped data, held back like givers
+-- (10-20 min: it shows a quest you were just at), whispered to FANOUT members. A fact is
+-- used once CONFIRM different players reported the exact same value. Humans aren't asked
+-- for reputation (Diplomacy: +10%, it would never agree with anyone else's).
+-- VoidQuestDB.facts = { own = { [q] = { i=, p=, t=, sent = { i=, p= } } },
+--                       heard = { [q] = { i = { [value] = { n, v = { [hash] = true } } }, p = ... } } }
+-- tools/cmd/forever-quests -facts folds the confirmed ones into ForeverQuests.lua.
+----------------------------------------------------------------------
+local FACT_VALUES = 3     -- different values kept per quest and field
+local function facts()
+    VoidQuestDB.facts = VoidQuestDB.facts or { own = {}, heard = {} }
+    local f = VoidQuestDB.facts
+    f.own, f.heard = f.own or {}, f.heard or {}
+    return f
+end
+
+-- the shipped value, in the same form, to compare with
+local function shippedFact(qid, field)
+    local r = VQ.ForeverQuests[qid]
+    if not r then return nil end
+    local out = {}
+    if field == "i" then
+        for s in (r[11] or ""):gmatch("%d+") do out[#out + 1] = tonumber(s) end
+        table.sort(out)
+        return table.concat(out, ".")
+    end
+    local pairsT = {}
+    for fid, v in (r[12] or ""):gmatch("(%d+):(%d+)") do pairsT[#pairsT + 1] = { tonumber(fid), tonumber(v) } end
+    table.sort(pairsT, function(a, b) return a[1] < b[1] end)
+    for _, p in ipairs(pairsT) do out[#out + 1] = p[1] .. "." .. p[2] end
+    return table.concat(out, ".")
+end
+
+local factTicker
+local function anyUnsent(f)
+    for _, e in pairs(f.own) do
+        local sent = e.sent or {}
+        if (e.i and not sent.i) or (e.p and not sent.p) then return true end
+    end
+    return false
+end
+local function flushFacts()
+    if not enabled() or not VoidQuestDB then return end
+    local f, now, due = facts(), time(), {}
+    for q, e in pairs(f.own) do
+        e.sent = e.sent or {}
+        for _, field in ipairs({ "i", "p" }) do
+            if e[field] and not e.sent[field] and now >= (e.t or 0) + (e.hold or HOLD_MIN) and #due < FLUSH_MAX then
+                due[#due + 1] = { q, field, e[field] }
+            end
+        end
+    end
+    -- stop only when nothing is left to send (still-held facts keep the ticker: Codex review)
+    if #due == 0 then
+        if factTicker and not anyUnsent(f) then factTicker:Cancel(); factTicker = nil end
+        return
+    end
+    requestRoster()
+    local targets = pick(FANOUT)
+    if #targets == 0 then tally("nobody", "F"); return end
+    if #queue > QUEUE_MAX / 2 then return end
+    for _, d in ipairs(due) do
+        local msg = ("F:%s:%d:%s=%s"):format(PROTO, d[1], d[2], d[3])
+        if #msg <= MAX_LEN then
+            for _, to in ipairs(targets) do send(msg, to) end
+        end
+        f.own[d[1]].sent[d[2]] = true
+    end
+end
+local function startFactTicker()
+    if enabled() and not factTicker then factTicker = C_Timer.NewTicker(60, flushFacts) end
+end
+
+-- Note one of your own observations; shared only when it differs from the shipped data.
+local function noteFact(qid, field, value)
+    if not (qid and VQ.ForeverQuests[qid] and value and value ~= "") then return end
+    local f = facts()
+    local e = f.own[qid]
+    if value == shippedFact(qid, field) then
+        -- the game agrees with the shipped data: forget an earlier different reading (Codex review)
+        if e and e[field] then
+            e[field] = nil
+            if e.sent then e.sent[field] = nil end
+            if not e.i and not e.p then f.own[qid] = nil end
+        end
+        return
+    end
+    e = e or {}
+    f.own[qid] = e
+    if e[field] == value then startFactTicker(); return end
+    e[field], e.t = value, time()
+    e.hold = HOLD_MIN + math.random() * HOLD_SPREAD
+    e.sent = e.sent or {}
+    e.sent[field] = nil
+    startFactTicker()
+end
+
+-- The quest window's rewards (offer and turn-in). Only a complete list counts: every reward
+-- the window has must give its item ID, else try again a little later (Codex review).
+local function factWindow(qid, tries)
+    if not qid or qid == 0 or (GetQuestID and GetQuestID()) ~= qid then return end   -- window moved on
+    local ids, missing = {}, false
+    for _, kind in ipairs({ "reward", "choice" }) do
+        local n = (kind == "reward" and GetNumQuestRewards and GetNumQuestRewards())
+            or (kind == "choice" and GetNumQuestChoices and GetNumQuestChoices()) or 0
+        for i = 1, n do
+            local link = GetQuestItemLink and GetQuestItemLink(kind, i)
+            local id = link and C_Item.GetItemInfoInstant(link)
+            if id then ids[#ids + 1] = id else missing = true end
+        end
+    end
+    if missing then
+        if (tries or 0) < 4 then C_Timer.After(0.5, function() pcall(factWindow, qid, (tries or 0) + 1) end) end
+        return
+    end
+    if #ids == 0 then return end   -- progress page, or nothing to give: says nothing
+    table.sort(ids)
+    noteFact(qid, "i", table.concat(ids, "."))
+end
+
+-- The reputation a turn-in really paid: its chat lines come right with the turn-in, so only
+-- lines in the next second count (a mob kill a few seconds later is not the quest's), and when
+-- the shipped data names the quest's factions, only those (Codex review).
+local REP_WINDOW = 1.0
+local REP_FMT = (FACTION_STANDING_INCREASED or "Reputation with %s increased by %d.")
+    :gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)")
+local turnIn   -- { qid, at, got = { [fid] = amount } }
+local factionID
+local function finishTurnIn(t)
+    if not t or t.done then return end
+    t.done = true
+    local list = {}
+    for fid, v in pairs(t.got) do list[#list + 1] = { fid, v } end
+    if #list == 0 then return end
+    table.sort(list, function(a, b) return a[1] < b[1] end)
+    local out = {}
+    for _, p in ipairs(list) do out[#out + 1] = p[1] .. "." .. p[2] end
+    noteFact(t.qid, "p", table.concat(out, "."))
+end
+local function repLine(msg)
+    if not turnIn or turnIn.done or GetTime() - turnIn.at > REP_WINDOW or type(msg) ~= "string"
+        or (issecretvalue and issecretvalue(msg)) then return end
+    local name, amt = msg:match("^" .. REP_FMT .. "$")
+    if not name then name, amt = msg:match("^Reputation with (.+) increased by (%d+)%.$") end
+    if not name then name, amt = msg:match("^Your (.+) reputation has increased by (%d+)%.$") end
+    if not (name and amt) then return end
+    if not factionID then
+        factionID = {}
+        for id, n in pairs(VQ.ForeverFactions or {}) do factionID[n] = id end
+    end
+    local fid = factionID[name]
+    if not fid then return end
+    local r = VQ.ForeverQuests[turnIn.qid]
+    local shipped = r and r[12] or ""
+    if shipped:find("%d") and not ("," .. shipped):find("," .. fid .. ":", 1, true) then return end
+    turnIn.got[fid] = tonumber(amt)
+end
+local function onTurnIn(qid)
+    local _, race = UnitRace("player")
+    if race == "Human" then return end   -- Diplomacy changes every amount
+    finishTurnIn(turnIn)   -- a quick second turn-in: keep what the first one got (Codex review)
+    local t = { qid = qid, at = GetTime(), got = {} }
+    turnIn = t
+    C_Timer.After(REP_WINDOW + 0.5, function() finishTurnIn(t) end)
+end
+
+-- Someone else's fact (untrusted): strict format, real quest, counted per player. A player
+-- gets ONE vote per quest and field, whatever value (Codex review: one sender sending three
+-- values could otherwise fill every slot); a full list makes room by dropping a value only
+-- one player backs.
+local function takeFact(qid, body, sender)
+    local field, value = body:match("^([ip])=([%d%.]+)$")
+    if not field or #value > 120 or not VQ.ForeverQuests[qid] then tally("dropped", "fact"); return end
+    local n = 0
+    for _ in value:gmatch("%d+") do n = n + 1 end
+    if n == 0 or n > 16 or (field == "p" and n % 2 ~= 0) then tally("dropped", "fact"); return end
+    local f = facts()
+    local q = f.heard[qid] or {}
+    f.heard[qid] = q
+    local voters = q[field .. "v"] or {}
+    q[field .. "v"] = voters
+    local h = senderHash(sender)
+    if voters[h] then return end   -- this player already voted on this quest's field
+    local byVal = q[field] or {}
+    q[field] = byVal
+    local c = byVal[value]
+    if not c then
+        local count, weakest = 0, nil
+        for v, cc in pairs(byVal) do
+            count = count + 1
+            if cc.n < CONFIRM and (not weakest or cc.n < byVal[weakest].n) then weakest = v end
+        end
+        if count >= FACT_VALUES then
+            if not weakest then return end   -- every value is backed by 2+ players: keep them
+            byVal[weakest] = nil
+        end
+        c = { n = 0, v = {} }
+        byVal[value] = c
+    end
+    if c.n >= VOTES_KEPT then return end
+    voters[h] = true
+    c.v[h], c.n = true, c.n + 1
+end
+
+-- The reward items for a quest: your own observation, else a value CONFIRM players agree on.
+function Share:FactItems(qid)
+    local f = VoidQuestDB and VoidQuestDB.facts
+    if not f then return nil end
+    local own = f.own and f.own[qid]
+    if own and own.i then return (own.i:gsub("%.", ",")) end
+    local q = f.heard and f.heard[qid]
+    local best, bestN
+    for v, c in pairs(q and q.i or {}) do
+        if type(c) == "table" and c.n and c.n >= CONFIRM and (not bestN or c.n > bestN) then best, bestN = v, c.n end
+    end
+    return best and (best:gsub("%.", ",")) or nil
+end
+
 -- sender = canon(name); replyTo = the name to whisper back (as the game gave it)
 function Share:OnMessage(msg, sender, replyTo)
     if type(msg) ~= "string" or type(sender) ~= "string" then return end
@@ -628,6 +854,13 @@ function Share:OnMessage(msg, sender, replyTo)
     if not enabled() or sender == me or not VoidQuestDB then return end
     tally("got", msg)
     if not rateOK(sender) then tally("dropped", "rate"); return end
+    -- quest facts carry a quest ID where the others carry a map
+    local fp, fq, fbody = msg:match("^F:(%d+):(%d+):(.+)$")
+    if fp then
+        if fp ~= PROTO then tally("dropped", "proto"); return end
+        takeFact(tonumber(fq), fbody, sender)
+        return
+    end
     local tag, proto, mapS, body = msg:match("^(%a):(%d+):(%d+):?(.*)$")
     if proto ~= PROTO then tally("dropped", "proto"); return end
     local mapID = tonumber(mapS)
@@ -801,7 +1034,23 @@ function Share:Init()
     f:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
     f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     f:RegisterEvent("ZONE_CHANGED")
+    -- quest facts: the quest window's rewards, and the reputation a turn-in really paid
+    f:RegisterEvent("QUEST_DETAIL")
+    f:RegisterEvent("QUEST_COMPLETE")
+    f:RegisterEvent("QUEST_TURNED_IN")
+    f:RegisterEvent("CHAT_MSG_COMBAT_FACTION_CHANGE")
     f:SetScript("OnEvent", function(_, event, prefix, msg, channel, sender, _, _, localID, _, base)
+        if event == "QUEST_DETAIL" or event == "QUEST_COMPLETE" then
+            local qid = GetQuestID and GetQuestID()   -- snapshot now: the window may move on
+            C_Timer.After(0.2, function() pcall(factWindow, qid) end)
+            return
+        elseif event == "QUEST_TURNED_IN" then
+            if type(prefix) == "number" then pcall(onTurnIn, prefix) end   -- arg1 = questID
+            return
+        elseif event == "CHAT_MSG_COMBAT_FACTION_CHANGE" then
+            pcall(repLine, prefix)   -- arg1 = the message text
+            return
+        end
         if event == "CHAT_MSG_CHANNEL_NOTICE" then
             -- arg1 = notice, arg4 = "6. Name", arg9 = Name. A refused join names the channel
             -- (WRONG_PASSWORD / BANNED); NOT_ALLOWED_IN_CHANNEL doesn't, blocked() sees that one.
@@ -840,6 +1089,13 @@ function Share:Init()
         publish()   -- "—" until the member list is read
     end
     Share:RestoreHeld()
+    -- facts still waiting from before a /reload
+    for _, e in pairs(VoidQuestDB.facts and VoidQuestDB.facts.own or {}) do
+        if (e.i and not (e.sent and e.sent.i)) or (e.p and not (e.sent and e.sent.p)) then
+            startFactTicker()
+            break
+        end
+    end
     -- the chat/channel system needs a few seconds after login
     C_Timer.After(10, function()
         Share:JoinNet()
@@ -882,6 +1138,23 @@ function Share:Stats()
         #roster, #roster == 1 and "" or "s",
         quests, quests == 1 and "" or "s", confirmed, self.heardMsgs, self.heardMsgs == 1 and "" or "s",
         players, players == 1 and "" or "s"))
+    -- quest facts: your own observations that differ from the shipped data, and other players'
+    local fo, fs, fh, fc = 0, 0, 0, 0
+    local fdb = VoidQuestDB and VoidQuestDB.facts
+    for _, e in pairs(fdb and fdb.own or {}) do
+        fo = fo + 1
+        if e.sent and (e.sent.i or e.sent.p) then fs = fs + 1 end
+    end
+    for _, q in pairs(fdb and fdb.heard or {}) do
+        fh = fh + 1
+        local ok = false
+        for _, field in ipairs({ "i", "p" }) do   -- (q also holds the voter sets "iv" / "pv")
+            for _, c in pairs(q[field] or {}) do if c.n >= CONFIRM then ok = true end end
+        end
+        if ok then fc = fc + 1 end
+    end
+    VQ:Print(("Quest facts (rewards / reputation that differ from the shipped data): %d of your own (%d sent), %d quest%s heard about, %d confirmed by 2+ players."):format(
+        fo, fs, fh, fh == 1 and "" or "s", fc))
     -- the traffic counter since it started (all sessions)
     local s = VoidQuestDB and VoidQuestDB.netStats
     if s then

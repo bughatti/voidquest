@@ -1774,7 +1774,9 @@ local function XPTag(e)
 end
 
 function mod:AtMaxLevel()
-    local maxLvl = (GetMaxLevelForPlayerExpansion and GetMaxLevelForPlayerExpansion()) or 90
+    -- the fallback cap is 60 on WoW Forever, not Midnight's 90 (Forever audit, 2026-11-10)
+    local maxLvl = (GetMaxLevelForPlayerExpansion and GetMaxLevelForPlayerExpansion())
+        or (VQ.ForeverQuests and 60) or 90
     return (UnitLevel("player") or 0) >= maxLvl
 end
 

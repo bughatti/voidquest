@@ -44,6 +44,18 @@ local PORTALS = {
     { map = 84,   x = 43.6,  y = 87.2,  toMap = 103,  faction = "Alliance", name = "portal to the Exodar",      zone = "Stormwind City" },
 }
 
+-- WoW Forever: no portals, the Horde zeppelins (tower spots from VoidGPS's Places.lua, NorgannonDB).
+-- Boats aren't listed: when no way is known, VoidGPS (if installed) routes it, and it learns
+-- every boat you ride. Forever audit 2026-11-09: pins to another continent had no way at all.
+if (select(4, GetBuildInfo()) or 0) < 100000 then
+    PORTALS = {
+        { map = 1411, x = 50.82, y = 13.54, toMap = 1420, faction = "Horde", name = "zeppelin to Undercity", zone = "the towers outside Orgrimmar" },
+        { map = 1411, x = 50.69, y = 12.89, toMap = 1434, faction = "Horde", name = "zeppelin to Grom'gol", zone = "the towers outside Orgrimmar" },
+        { map = 1420, x = 60.74, y = 58.87, toMap = 1411, faction = "Horde", name = "zeppelin to Orgrimmar", zone = "Tirisfal Glades" },
+        { map = 1434, x = 31.54, y = 29.36, toMap = 1411, faction = "Horde", name = "zeppelin to Orgrimmar", zone = "Grom'gol, Stranglethorn Vale" },
+    }
+end
+
 -- The world (instance) a map point is in; x, y on 0-1 (the map's middle when omitted).
 -- Some maps (cities, micro-maps) don't convert: then the parent maps are tried.
 local function worldOf(mapID, x, y)
@@ -67,8 +79,19 @@ local function playerWorld()
     return worldOf(m)
 end
 
--- First portal on the way from world `from` to world `to` (breadth-first).
-local function firstHop(from, to)
+-- First portal on the way from world `from` to world `to` (breadth-first). Two ways straight
+-- into the target's world (Orgrimmar's zeppelins to Undercity and to Grom'gol): the one landing
+-- in the target's own zone (or a parent of it) wins.
+local function inZone(map, zone)
+    for _ = 1, 6 do
+        if not map or map <= 0 then return false end
+        if map == zone then return true end
+        local info = C_Map.GetMapInfo(map)
+        map = info and info.parentMapID
+    end
+    return false
+end
+local function firstHop(from, to, targetMap)
     local faction = UnitFactionGroup("player")
     local edges = {}
     for _, p in ipairs(PORTALS) do
@@ -78,6 +101,11 @@ local function firstHop(from, to)
                 edges[a] = edges[a] or {}
                 table.insert(edges[a], { to = b, portal = p })
             end
+        end
+    end
+    if targetMap then
+        for _, e in ipairs(edges[from] or {}) do
+            if e.to == to and inZone(targetMap, e.portal.toMap) then return e.portal end
         end
     end
     local queue, seen, firstOf, i = { from }, { [from] = true }, {}, 1
@@ -159,12 +187,19 @@ function Route:Go(t, opts)
 
     local here, there = playerWorld(), worldOf(t.map, t.x, t.y)
     if here and there and here ~= there then
-        local hop = firstHop(here, there)
+        local hop = firstHop(here, there, t.map)
         if hop and C_Map.CanSetUserWaypointOnMap(hop.map) then
             state.route = { target = t, opts = opts }
             pin(hop.map, hop.x / 100, hop.y / 100, { say = opts.say })   -- portals: default distance
             if say then say(("%s is in another part of the world: first the %s (%s), then the arrow moves on."):format(
                 t.name or "That", hop.name, hop.zone)) end
+            return true
+        end
+        -- no way we know: VoidGPS knows flight paths and every boat you've ridden
+        local GPS = _G.VoidGPS
+        if not hop and GPS and GPS.RouteTo and (select(4, GetBuildInfo()) or 0) < 100000   -- Forever only (Sol)
+           and GPS:RouteTo({ name = t.name or "target", sub = t.zone, map = t.map, x = t.x, y = t.y }) then
+            if say then say(("%s is in another part of the world: VoidGPS shows the way."):format(t.name or "That")) end
             return true
         end
     end
@@ -188,7 +223,7 @@ end
 function Route:Hop(map, x, y)
     local here, there = playerWorld(), worldOf(map, x, y)
     if not (here and there and here ~= there) then return nil end
-    local hop = firstHop(here, there)
+    local hop = firstHop(here, there, map)
     if not (hop and C_Map.CanSetUserWaypointOnMap(hop.map)) then return nil end
     return { map = hop.map, x = hop.x / 100, y = hop.y / 100, name = hop.name, zone = hop.zone }
 end

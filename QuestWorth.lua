@@ -434,7 +434,10 @@ local function Payoffs(qid, out)
         local n = (C_Spell and C_Spell.GetSpellName and safe(C_Spell.GetSpellName, spell)) or (GetSpellInfo and safe(GetSpellInfo, spell))
         if type(n) == "string" and not secret(n) then out[#out + 1] = n else pending = true end
     end
-    for s in (r[11] or ""):gmatch("%d+") do
+    -- no rewards in Blizzard's data: what you saw yourself, or what other players confirmed
+    local ids = r[11] or ""
+    if ids == "" and VQ.Share and VQ.Share.FactItems then ids = VQ.Share:FactItems(qid) or "" end
+    for s in ids:gmatch("%d+") do
         local id = tonumber(s)
         if not C_Item.IsItemDataCachedByID(id) then
             C_Item.RequestLoadItemDataByID(id)

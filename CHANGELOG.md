@@ -1,5 +1,15 @@
 # VoidQuest Changelog
 
+## 0.3.18
+
+### WoW Forever
+- **Find your quest's mobs:** one marker per unfinished objective on the minimap edge pointing the way while it's out of range, at the spot once in range, gone when you're there. Red = kill, yellow = drops the item, blue = object, pale gold = the game's own objective point.
+- **Quest icon on nameplates** over each mob in view that counts for your unfinished objectives (and rares), from the game's own quest data.
+- **Learns where mobs really are:** spots you see quest mobs at feed the markers (stays on your PC).
+- **Quest rewards shared:** quest rewards and reputation gains seen in game are shared with other VoidQuest players and confirmed by two before use. See Privacy.
+- **Pins to another continent** take the zeppelin (and VoidGPS's learned boats when installed).
+- Coffer key and delve tracking no longer run on Forever.
+
 ## 0.3.17
 
 - **WoW Forever: the quest's own rewards, for you.** The box beside the quest window now reads the rewards straight from the quest window and says which are for your character: "Rewards for you: Quilboar Blaster", or "Rewards: none for your Rogue (mail, shields)". A blue reward you can use makes it **worth it for you**. Blizzard's quest data has no rewards for many quests (A Vengeful Fate showed "nothing lasting" even though it offers a blue gun).

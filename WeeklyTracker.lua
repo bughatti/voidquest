@@ -25,6 +25,11 @@ VQ.Coffer = mod
 
 local function safe(fn, ...) if not fn then return nil end local ok, a, b, c = pcall(fn, ...) if ok then return a, b, c end end
 
+-- WoW Forever has no coffer keys or delves, and its cap is 60, so a level-60 character got
+-- "Coffer keys: 0" lines and quest-line scans on every zone change. ForeverQuests.lua loads
+-- first and only sets this table on Forever (Forever audit, 2026-11-10).
+local FOREVER = VQ.ForeverQuests ~= nil
+
 local CUR_KEYS, CUR_SHARDS, CUR_UNDERCOIN, CUR_JOURNEY = 3028, 3310, 2803, 3464
 local SHARDS_PER_KEY, VENDOR_KEYS, VENDOR_PRICE, VENDOR_RANK = 100, 2, 2000, 6
 local VENDOR_NPC = 242398
@@ -226,6 +231,7 @@ end
 -- Warm up in the background (login, new zone): the reward requests go out now, so the
 -- window opens full instead of filling in.
 function mod:Prewarm()
+    if FOREVER then return end   -- no coffer keys on Forever (Forever audit, 2026-11-10)
     if not MaxLevel() or (IsInInstance and IsInInstance()) then return end
     self.dirty = true
     self:Live()
@@ -268,6 +274,7 @@ end
 
 -- Panel line text, or nil when there's nothing left to get this week (or below max level).
 function mod:PanelLine()
+    if FOREVER then return nil end   -- no coffer keys on Forever (Forever audit, 2026-11-10)
     if not MaxLevel() then return nil end
     local st = self:State()
     if st.left <= 0 then return nil end
@@ -521,6 +528,7 @@ end
 -- companion ID = your active companion). Saved to VoidQuestCharDB.companionProbe.
 ----------------------------------------------------------------------
 function mod:CompanionProbe()
+    if FOREVER then return end   -- no delves on Forever (Forever audit, 2026-11-10)
     if not (VoidQuestCharDB and C_DelvesUI and C_DelvesUI.GetTraitTreeForCompanion and C_Traits) then return end
     local tree = safe(C_DelvesUI.GetTraitTreeForCompanion)
     local config = tree and safe(C_Traits.GetConfigIDByTreeID, tree)
@@ -575,6 +583,7 @@ function mod:CompanionProbe()
 end
 
 function mod:Init()
+    if FOREVER then return end   -- no events, timers or probe on Forever (Forever audit, 2026-11-10)
     local f = CreateFrame("Frame")
     for _, e in ipairs({ "MERCHANT_SHOW", "MERCHANT_UPDATE", "CURRENCY_DISPLAY_UPDATE", "QUEST_TURNED_IN",
                          "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_DATA_LOAD_RESULT", "QUESTLINE_UPDATE",

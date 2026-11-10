@@ -194,6 +194,8 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         VoidQuest.QuestItemDebug()
     elseif msg == "leftovers" and VoidQuest.LeftoversList then   -- quest items nothing needs anymore
         VoidQuest.LeftoversList()
+    elseif msg == "dots" and VoidQuest.Mobs then   -- minimap dots for the tracked quest's mobs on / off
+        VoidQuest.Mobs:Toggle()
     elseif msg == "drops" and VoidQuest.Drops then   -- where your quests' items have come from
         VoidQuest.Drops:List()
     elseif msg == "chains" and VoidQuest.Chains then   -- grey quests: keep or low value
