@@ -1,5 +1,16 @@
 # VoidQuest Changelog
 
+## 0.3.20
+
+### WoW Forever: quest-mob spots, shared
+- **Mob markers learn from everyone.** When a quest mob's nameplate shows up, VoidQuest already remembered where; now spots the shipped data doesn't have go to other VoidQuest players, and **once three players have seen a mob at the same spot, it's a marker for everyone**. The spot is averaged, so it settles where the mobs really are. Mobs players confirm count for a quest our data doesn't link get markers too.
+- **Quests you've already done count.** Mobs of quests you don't have (done, or never taken) are recorded too, with no icon for you, so their spots help everyone still on those quests.
+- Sent like quest givers: held back until you've left the map or 10-20 minutes, never live; tiny messages; `/vq net` shows your spots and how many were confirmed. Your earlier sightings are shared once.
+
+### WoW Forever: sharing per faction
+- **Horde and Alliance now share on separate channels.** The channel listed both factions, but whispers don't cross them, so every message to the other faction bounced and the Players online box counted players you couldn't reach. `/vq net` now also shows how many whispers bounced.
+- Older versions stay on the old channel: please update.
+
 ## 0.3.19
 
 ### WoW Forever: the Quest Book

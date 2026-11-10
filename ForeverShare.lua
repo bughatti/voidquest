@@ -72,9 +72,18 @@ local function code(seed, len)
     end
     return table.concat(out)
 end
-local function dailyChannel(day)
+-- One channel PER FACTION (2026-11-10): the channel lists both factions, but whispers don't
+-- cross them, so every whisper to an Alliance member bounced (the "2 online" were unreachable,
+-- 14 sends found nobody), and the other faction's quest data is no use to you anyway.
+-- shared = the old both-factions channel of that day (0.3.19 and older), only to leave it.
+local FACTION_SALT = { Horde = 1, Alliance = 2 }
+local function dailyChannel(day, shared)
     day = day or math.floor(((GetServerTime and GetServerTime()) or time()) / 86400)
     local s = mix(mix(DAILY_SALT, day), DAILY_SALT % 97)
+    if not shared then
+        local f = UnitFactionGroup and UnitFactionGroup("player")
+        s = mix(s, FACTION_SALT[f] or 3)   -- 3: no faction yet (a new Pandaren)
+    end
     return DAILY_TAG .. code(s, 6), code(mix(s, 104729), 8), day
 end
 local CHANNEL_NAME, CHANNEL_PW = dailyChannel()
@@ -618,6 +627,333 @@ local function takeEntries(mapID, body, sender)
 end
 
 ----------------------------------------------------------------------
+-- Quest-mob spots (the user, 2026-11-10: "if we see a quest mob in view can that translate to
+-- the minimap for a dot and of course over time after 3 or 4 people find it at the same spot
+-- its now concrete"). Addons get no mob positions, but a quest mob's nameplate means it's near
+-- you, and QuestMobs.lua records where you stood (VoidQuestDB.seenMobs). New spots the shipped
+-- data (NorgannonDB, ForeverSpawns) doesn't have go out like givers, held back the same way
+-- (PRIVACY: 10-20 min, or once you've left the map):
+--   M:1:mapID:npc,x,y,q;...   x/y = 0..999 (0.1% of the map), q = the quest it counted for, or 0
+-- ~16-22 bytes an entry, up to FLUSH_MAX entries a tick to FANOUT members. A heard spot is used
+-- once MOB_CONFIRM different players reported it within MOB_NEAR (averaged, so the dot settles
+-- where mobs really are); a mob's link to a quest the shipped data doesn't know likewise.
+-- VoidQuestDB.mobHeard[npc] = { s = { [map] = { { x, y, n, v = { [hash] = true }, t } } },
+--                               q = { [questID] = { n, v } } }
+-- VoidQuestDB.mobOut = { { npc, m, x, y, q, t, hold, sent }, ... }   your own, until a day after sent
+-- tools/cmd/forever-mobs -crowd folds the confirmed spots into ForeverMobs.lua.
+----------------------------------------------------------------------
+local MOB_CONFIRM = 3      -- players that must agree before a heard spot / link is used
+local MOB_NEAR    = 20     -- 0..999 units (2% of the map): reports this close are one spot
+local MOB_SPOTS   = 6      -- spots kept per mob per map
+local MOB_LINKS   = 3      -- quest links kept per mob
+local MOB_MAX     = 2000   -- mobs kept
+local MOB_OUT_MAX = 200
+local mobTicker, mobCount
+
+local function mobDB()
+    VoidQuestDB.mobHeard = VoidQuestDB.mobHeard or {}
+    VoidQuestDB.mobOut = VoidQuestDB.mobOut or {}
+    if not mobCount then
+        mobCount = 0
+        for _ in pairs(VoidQuestDB.mobHeard) do mobCount = mobCount + 1 end
+    end
+    return VoidQuestDB.mobHeard, VoidQuestDB.mobOut
+end
+
+local function near(ax, ay, bx, by) return math.abs(ax - bx) <= MOB_NEAR and math.abs(ay - by) <= MOB_NEAR end
+
+-- the shipped data already has this mob close to here
+local function seedMobNear(npc, mapID, x, y)
+    local s = VQ.ForeverSpawns and VQ.ForeverSpawns["n" .. npc]
+    local pts = s and s[mapID]
+    for i = 1, #(pts or "") - 5, 6 do
+        local px, py = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
+        if px and py and near(px, py, x, y) then return true end
+    end
+    return false
+end
+local function seedLinks(npc, qid)
+    for _, r in ipairs(VQ.ForeverMobs and VQ.ForeverMobs[qid] or {}) do
+        if r[2] == "n" .. npc then return true end
+    end
+    return false
+end
+
+local function flushMobs()
+    if not (enabled() and VoidQuestDB) then return end
+    local _, out = mobDB()
+    local here, now = C_Map.GetBestMapForUnit("player"), time()
+    local byMap, due, waiting = {}, 0, 0
+    for _, o in ipairs(out) do
+        if not o.sent then
+            if ((here and o.m ~= here) or now >= o.t + o.hold) and due < FLUSH_MAX then
+                byMap[o.m] = byMap[o.m] or {}
+                table.insert(byMap[o.m], o)
+                due = due + 1
+            else
+                waiting = waiting + 1
+            end
+        end
+    end
+    if due == 0 then
+        if waiting == 0 and mobTicker then mobTicker:Cancel(); mobTicker = nil end
+        return
+    end
+    requestRoster()
+    local targets = pick(FANOUT)
+    if #targets == 0 then tally("nobody", "M"); return end   -- stays held: the next tick tries again
+    if #queue > QUEUE_MAX / 2 then return end
+    for m, list in pairs(byMap) do
+        local entries = {}
+        for _, o in ipairs(list) do
+            entries[#entries + 1] = ("%d,%d,%d,%d"):format(o.npc, o.x, o.y, o.q or 0)
+            o.sent = now
+        end
+        sendEntries("M", m, entries, targets)
+    end
+    for i = #out, 1, -1 do   -- what went out over a day ago: forget (it only kept us from resending)
+        if out[i].sent and now - out[i].sent > 86400 then table.remove(out, i) end
+    end
+end
+
+-- QuestMobs calls this with a NEW spot you saw a quest mob at (x/y 0..999), or a new quest link
+-- at a spot. old = a sighting from before (backfill): not "where you are now", so it's fine
+-- inside a dungeon (Sol review: a login in an instance skipped the whole backfill).
+-- Returns "queued", "skip" (nothing new / sharing off) or "full" (200 unsent already: nothing
+-- unsent is ever pushed out; Sol review: a big backfill dropped its own entries).
+function Share:FoundMob(npc, mapID, x, y, qid, old)
+    if not (enabled() and VoidQuestDB and npc and mapID and x and y) then return "skip" end
+    if not old and IsInInstance() then return "skip" end
+    qid = qid or 0
+    -- only gaps: a spot the shipped data has, for a quest it links (or no quest), is nothing new
+    if (qid == 0 or seedLinks(npc, qid)) and seedMobNear(npc, mapID, x, y) then return "skip" end
+    local _, out = mobDB()
+    for _, o in ipairs(out) do
+        if o.npc == npc and o.m == mapID and (o.q or 0) == qid and near(o.x, o.y, x, y) then return "skip" end
+    end
+    if #out >= MOB_OUT_MAX then
+        local oldest
+        for i, o in ipairs(out) do
+            if o.sent and (not oldest or o.sent < out[oldest].sent) then oldest = i end
+        end
+        if not oldest then return "full" end
+        table.remove(out, oldest)
+    end
+    out[#out + 1] = { npc = npc, m = mapID, x = x, y = y, q = qid ~= 0 and qid or nil, t = time(),
+                      hold = HOLD_MIN + math.random() * HOLD_SPREAD }
+    if not mobTicker then mobTicker = C_Timer.NewTicker(60, flushMobs) end
+    return "queued"
+end
+
+-- one vote per player; full lists make room by dropping the weakest unconfirmed entry, else one
+-- nobody reported for STALE (two players could confirm a fake; it mustn't block the real one)
+local function vote(c, hash)
+    if c.v[hash] or c.n >= VOTES_KEPT then return false end
+    c.v[hash], c.n = true, c.n + 1
+    return c.n == MOB_CONFIRM
+end
+local function makeRoom(list, isArray)
+    local victimK
+    for k, c in pairs(list) do
+        if c.n < MOB_CONFIRM and (not victimK or c.n < list[victimK].n) then victimK = k end
+    end
+    if not victimK then
+        for k, c in pairs(list) do
+            if time() - (c.t or 0) > STALE and (not victimK or (c.t or 0) < (list[victimK].t or 0)) then victimK = k end
+        end
+    end
+    if not victimK then return false end
+    if isArray then table.remove(list, victimK) else list[victimK] = nil end
+    return true
+end
+
+-- The store is full: drop a mob nobody confirmed (oldest first), else one nobody reported for
+-- STALE. One sender inventing 2,000 mobs could otherwise lock real ones out for good; its fakes
+-- never get a second voter, so they're always the ones to go (Sol review).
+local function evictMob(heard)
+    local victim, victimT
+    local function confirmed(mob)
+        for _, list in pairs(mob.s or {}) do
+            for _, c in ipairs(list) do if c.n >= MOB_CONFIRM then return true end end
+        end
+        for _, l in pairs(mob.q or {}) do if l.n >= MOB_CONFIRM then return true end end
+        return false
+    end
+    for npc, mob in pairs(heard) do
+        if not confirmed(mob) and (not victim or (mob.t or 0) < victimT) then victim, victimT = npc, mob.t or 0 end
+    end
+    if not victim then
+        for npc, mob in pairs(heard) do
+            if time() - (mob.t or 0) > STALE and (not victim or (mob.t or 0) < victimT) then victim, victimT = npc, mob.t or 0 end
+        end
+    end
+    if not victim then return false end
+    heard[victim] = nil
+    mobCount = mobCount - 1
+    return true
+end
+
+local function takeMobs(mapID, body, sender)
+    local heard = mobDB()
+    local hash, n, changed = senderHash(sender), 0, false
+    for entry in body:gmatch("[^;]+") do
+        n = n + 1
+        if n > ENTRIES_MAX then break end
+        local ns, xs, ys, qs = entry:match("^(%d%d?%d?%d?%d?%d?%d?),(%d%d?%d?),(%d%d?%d?),(%d%d?%d?%d?%d?%d?)$")
+        local npc, x, y, q = tonumber(ns), tonumber(xs), tonumber(ys), tonumber(qs)
+        if npc and npc > 0 and x and y and x > 0 and y > 0 and x < 1000 and y < 1000 then
+            if q == 0 or not VQ.ForeverQuests[q] then q = nil end
+            local mob = heard[npc]
+            if not mob then
+                if mobCount >= MOB_MAX and not evictMob(heard) then tally("dropped", "mobs full"); break end
+                mob = { s = {}, q = {} }
+                heard[npc] = mob
+                mobCount = mobCount + 1
+            end
+            mob.t = time()   -- last reported (eviction goes by it)
+            local list = mob.s[mapID] or {}
+            mob.s[mapID] = list
+            local hit
+            for _, c in ipairs(list) do if near(c.x, c.y, x, y) then hit = c; break end end
+            if hit then
+                hit.t = time()
+                local was = hit.n
+                if vote(hit, hash) then changed = true end
+                if hit.n > was then   -- average: the dot settles where the mobs are
+                    hit.x = math.floor((hit.x * was + x) / hit.n + 0.5)
+                    hit.y = math.floor((hit.y * was + y) / hit.n + 0.5)
+                end
+            elseif #list < MOB_SPOTS or makeRoom(list, true) then
+                list[#list + 1] = { x = x, y = y, n = 1, v = { [hash] = true }, t = time() }
+            end
+            if q and not seedLinks(npc, q) then
+                local l = mob.q[q]
+                if not l then
+                    local count = 0
+                    for _ in pairs(mob.q) do count = count + 1 end
+                    if count < MOB_LINKS or makeRoom(mob.q, false) then
+                        l = { n = 0, v = {}, t = time() }
+                        mob.q[q] = l
+                    end
+                end
+                if l then
+                    l.t = time()
+                    if vote(l, hash) then changed = true end
+                end
+            end
+        end
+    end
+    if changed and VQ.Mobs and VQ.Mobs.Refresh then VQ.Mobs:Refresh() end
+end
+
+-- Confirmed crowd spots for a mob on a map, as "xxxyyy..." (like ForeverSpawns), or "".
+function Share:MobPts(npc, mapID)
+    local mob = VoidQuestDB and VoidQuestDB.mobHeard and VoidQuestDB.mobHeard[npc]
+    local list = mob and mob.s and mob.s[mapID]
+    if not list then return "" end
+    local out = {}
+    for _, c in ipairs(list) do
+        if c.n >= MOB_CONFIRM then out[#out + 1] = ("%03d%03d"):format(c.x, c.y) end
+    end
+    return table.concat(out)
+end
+
+-- Mobs players confirmed count for a quest the shipped data doesn't link them to, with
+-- confirmed spots on this map: { [npc] = "xxxyyy..." }.
+function Share:MobsForQuest(qid, mapID)
+    local out = {}
+    for npc, mob in pairs(VoidQuestDB and VoidQuestDB.mobHeard or {}) do
+        local l = mob.q and mob.q[qid]
+        if l and l.n >= MOB_CONFIRM then
+            local pts = self:MobPts(npc, mapID)
+            if pts ~= "" then out[npc] = pts end
+        end
+    end
+    return out
+end
+
+function Share:MobStats()
+    local mobs, spots, confirmed, mine, sent = 0, 0, 0, 0, 0
+    for _, mob in pairs(VoidQuestDB and VoidQuestDB.mobHeard or {}) do
+        mobs = mobs + 1
+        for _, list in pairs(mob.s or {}) do
+            for _, c in ipairs(list) do
+                spots = spots + 1
+                if c.n >= MOB_CONFIRM then confirmed = confirmed + 1 end
+            end
+        end
+    end
+    for _, o in ipairs(VoidQuestDB and VoidQuestDB.mobOut or {}) do
+        mine = mine + 1
+        if o.sent then sent = sent + 1 end
+    end
+    return mobs, spots, confirmed, mine, sent
+end
+
+-- Once: sightings recorded before sharing existed (VoidQuestDB.seenMobs) go out like new ones,
+-- quest mobs only (a quest's objective said so, or the shipped data lists the mob for a quest),
+-- quest titles mapped to IDs by Forever's quest list (unique titles only). FoundMob's own rules
+-- apply: only what the shipped data lacks, held back, not twice.
+function Share:BackfillMobs()
+    if not (enabled() and VoidQuestDB and VoidQuestDB.seenMobs) or VoidQuestDB.mobBackfilled then return end
+    local byTitle, dup = {}, {}
+    for q, r in pairs(VQ.ForeverQuests) do
+        local t = type(r) == "table" and r[1]
+        if t then
+            if byTitle[t] then dup[t] = true else byTitle[t] = q end
+        end
+    end
+    local quest = {}
+    for _, refs in pairs(VQ.ForeverMobs or {}) do
+        for _, r in ipairs(refs) do
+            local id = tonumber(r[2]:match("^n(%d+)$"))
+            if id then quest[id] = true end
+        end
+    end
+    local n, full = 0, false
+    VoidQuestDB.mobBackDone = VoidQuestDB.mobBackDone or {}
+    local done = VoidQuestDB.mobBackDone
+    for npc, s in pairs(VoidQuestDB.seenMobs) do
+        local qids = {}
+        for title in pairs(type(s) == "table" and s.q or {}) do
+            local q = not dup[title] and byTitle[title]
+            if q then qids[#qids + 1] = q end
+        end
+        if type(npc) == "number" and type(s) == "table" and (#qids > 0 or quest[npc]) then
+            for map, pts in pairs(s.m or {}) do
+                for i = 1, #pts - 5, 6 do
+                    local x, y = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
+                    if x and y then
+                        -- each one handled once, across retries (Sol review: a retry from the top
+                        -- could requeue the first batch forever and starve the rest)
+                        for _, q in ipairs(#qids == 0 and { 0 } or qids) do
+                            local key = npc .. ":" .. map .. ":" .. x .. ":" .. y .. ":" .. q
+                            if not done[key] then
+                                if self:FoundMob(npc, map, x, y, q, true) == "full" then full = true else done[key] = true end
+                            end
+                        end
+                        n = n + 1
+                    end
+                end
+            end
+        end
+    end
+    -- the queue filled up: try again next login (what went in stays; nothing is queued twice)
+    if not full then VoidQuestDB.mobBackfilled, VoidQuestDB.mobBackDone = true, nil end
+    return n
+end
+
+function Share:RestoreMobs()
+    if not (enabled() and VoidQuestDB) then return end
+    for _, o in ipairs(VoidQuestDB.mobOut or {}) do
+        if not o.sent then
+            if not mobTicker then mobTicker = C_Timer.NewTicker(60, flushMobs) end
+            return
+        end
+    end
+end
+
+----------------------------------------------------------------------
 -- Quest facts (the user, 2026-11-09: "we need to be collecting as much of this data as
 -- possible to validate or add to ... this is something that should be sent over the
 -- voidquest channel"). What the game itself shows and pays, where it differs from what
@@ -890,6 +1226,8 @@ function Share:OnMessage(msg, sender, replyTo)
         end)
     elseif tag == "B" or tag == "N" then
         takeEntries(mapID, body, sender)
+    elseif tag == "M" then
+        takeMobs(mapID, body, sender)
     end
 end
 
@@ -976,6 +1314,7 @@ function Share:Apply()
     if enabled() then
         self:JoinNet()
         self:RestoreHeld()
+        self:RestoreMobs()
         C_Timer.After(3, askHere)
     else
         -- off means off: nothing queued, held or scheduled goes out any more
@@ -984,6 +1323,10 @@ function Share:Apply()
         wipe(pending)
         if sending then sending:Cancel(); sending = nil end
         if pendingTicker then pendingTicker:Cancel(); pendingTicker = nil end
+        -- held mob spots too: dropped, not sent later
+        if mobTicker then mobTicker:Cancel(); mobTicker = nil end
+        local out = VoidQuestDB and VoidQuestDB.mobOut
+        for i = #(out or {}), 1, -1 do if not out[i].sent then table.remove(out, i) end end
         if netIndex() then LeaveChannelByName(CHANNEL_NAME) end
     end
     publish()
@@ -1016,6 +1359,9 @@ function Share:Init()
     CHANNEL_NAME, CHANNEL_PW, today = dailyChannel()   -- again now that the server time is surely in
     -- channels survive a /reload: yesterday's goes too (reload across 00:00 UTC, Codex)
     table.insert(OLD_CHANNELS, (dailyChannel(today - 1)))
+    -- and the old both-factions channels (0.3.19 and older), today's and yesterday's
+    table.insert(OLD_CHANNELS, (dailyChannel(today, true)))
+    table.insert(OLD_CHANNELS, (dailyChannel(today - 1, true)))
     me = canon(GetUnitName and GetUnitName("player") or UnitName("player"))
     -- offline marks: this session only, never saved (the user, 2026-11-09: "get rid of the offline
     -- list"); the old saved list is deleted
@@ -1066,7 +1412,9 @@ function Share:Init()
             end
         elseif event == "CHAT_MSG_SYSTEM" then   -- our whisper bounced: unreachable for a while
             local name = bouncedName(prefix)  -- arg1 = the message text
-            if name then unreach[name] = time(); publish() end
+            -- counted (2026-11-10: the "2 online" were on the channel but every whisper bounced,
+            -- likely the other faction; nothing showed it)
+            if name then unreach[name] = time(); tally("offline", "whisper"); publish() end
         elseif event == "CHAT_MSG_ADDON" then
             if prefix ~= PREFIX or type(sender) ~= "string" or sender == "" then return end
             -- whispers; or our channel, should Blizzard let channel addon messages through again
@@ -1089,6 +1437,8 @@ function Share:Init()
         publish()   -- "—" until the member list is read
     end
     Share:RestoreHeld()
+    Share:RestoreMobs()   -- mob spots still held from before a /reload
+    C_Timer.After(30, function() pcall(Share.BackfillMobs, Share) end)   -- once: sightings from before sharing
     -- facts still waiting from before a /reload
     for _, e in pairs(VoidQuestDB.facts and VoidQuestDB.facts.own or {}) do
         if (e.i and not (e.sent and e.sent.i)) or (e.p and not (e.sent and e.sent.p)) then
@@ -1155,6 +1505,9 @@ function Share:Stats()
     end
     VQ:Print(("Quest facts (rewards / reputation that differ from the shipped data): %d of your own (%d sent), %d quest%s heard about, %d confirmed by 2+ players."):format(
         fo, fs, fh, fh == 1 and "" or "s", fc))
+    local mobs, spots, mconf, mine, msent = self:MobStats()
+    VQ:Print(("Quest-mob spots: %d of your own (%d sent), %d heard for %d mob%s, %d confirmed by %d+ players."):format(
+        mine, msent, spots, mobs, mobs == 1 and "" or "s", mconf, MOB_CONFIRM))
     -- the traffic counter since it started (all sessions)
     local s = VoidQuestDB and VoidQuestDB.netStats
     if s then

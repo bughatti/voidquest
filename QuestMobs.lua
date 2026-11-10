@@ -82,10 +82,16 @@ local function GamePOIs(mapID)
     return out
 end
 local function hasSpotsOn(qid, mapID)
+    local Sh = VQ.Share
     for _, r in ipairs(VQ.ForeverMobs[qid] or {}) do
         local s = VQ.ForeverSpawns[r[2]]
         if s and s[mapID] then return true end
+        -- or spots 3+ players confirmed for that mob here (ForeverShare)
+        local npc = tonumber(r[2]:match("^n(%d+)$"))
+        if npc and Sh and Sh.MobPts and Sh:MobPts(npc, mapID) ~= "" then return true end
     end
+    -- or mobs players confirmed count for it, with confirmed spots here
+    if Sh and Sh.MobsForQuest and next(Sh:MobsForQuest(qid, mapID)) then return true end
     return false
 end
 local function QuestsFor(mapID)
@@ -103,7 +109,7 @@ local function QuestsFor(mapID)
         local info = safe(C_QuestLog.GetInfo, i)
         local qid = info and not info.isHeader and info.questID
         if qid and not secret(qid) and not safe(C_QuestLog.IsComplete, qid)
-            and ((VQ.ForeverMobs[qid] and hasSpotsOn(qid, mapID)) or pois[qid] or (info.title and learned[info.title])) then
+            and (hasSpotsOn(qid, mapID) or pois[qid] or (info.title and learned[info.title])) then
             out[#out + 1] = qid
             if #out >= MAX_QUESTS then break end
         end
@@ -146,7 +152,9 @@ function M:AddQuestDots(out, qid, mapID)
             -- NorgannonDB's spots + the spots you've SEEN this mob at (its nameplate came up)
             local npc = tonumber(key:match("^n(%d+)$"))
             local learned = npc and seen[npc] and seen[npc].m and seen[npc].m[mapID] or ""
-            local pts = ((VQ.ForeverSpawns[key] and VQ.ForeverSpawns[key][mapID]) or "") .. learned
+            -- + spots 3+ other players saw it at (ForeverShare)
+            local crowd = npc and VQ.Share and VQ.Share.MobPts and VQ.Share:MobPts(npc, mapID) or ""
+            local pts = ((VQ.ForeverSpawns[key] and VQ.ForeverSpawns[key][mapID]) or "") .. learned .. crowd
             if pts ~= "" then
                 for i = 1, #pts - 5, 6 do
                     local x, y = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
@@ -165,7 +173,7 @@ function M:AddQuestDots(out, qid, mapID)
             local objText = type(s.q[title]) == "string" and s.q[title] or nil
             local o = ObjectiveFor(objs, objText or s.n)
             if not (o and o.finished) then
-                local pts = s.m[mapID]
+                local pts = s.m[mapID] .. (VQ.Share and VQ.Share.MobPts and VQ.Share:MobPts(npc, mapID) or "")
                 for i = 1, #pts - 5, 6 do
                     local x, y = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
                     if x and y then
@@ -173,6 +181,26 @@ function M:AddQuestDots(out, qid, mapID)
                         local drop = objText and objText:lower() ~= (s.n or ""):lower()
                         out[#out + 1] = { x = x / 1000, y = y / 1000, kind = drop and "d" or "k", name = s.n,
                                           quest = title, obj = o, objText = drop and objText or nil }
+                    end
+                end
+            end
+        end
+    end
+    -- Mobs 3+ other players saw counting for this quest (ForeverShare), not linked by our data
+    -- and not seen by you yet: their confirmed spots.
+    if VQ.Share and VQ.Share.MobsForQuest then
+        for npc, pts in pairs(VQ.Share:MobsForQuest(qid, mapID)) do
+            local s = seen[npc]
+            if not inRefs["n" .. npc] and not (s and s.q and s.q[title]) then
+                local name = (VQ.ForeverMobNames and VQ.ForeverMobNames["n" .. npc]) or (s and s.n) or nil
+                local o = name and ObjectiveFor(objs, name)
+                if not (o and o.finished) then
+                    for i = 1, #pts - 5, 6 do
+                        local x, y = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
+                        if x and y then
+                            out[#out + 1] = { x = x / 1000, y = y / 1000, kind = "k", name = name or "a quest mob",
+                                              quest = title, obj = o }
+                        end
                     end
                 end
             end
@@ -393,6 +421,32 @@ local function NpcID(unit)
     return tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
 end
 
+-- Is this NPC a quest mob in the shipped data (kill / drop, any quest)? Built once.
+local questMobSet
+local function IsQuestMob(npc)
+    if not questMobSet then
+        questMobSet = {}
+        for _, refs in pairs(VQ.ForeverMobs or {}) do
+            for _, r in ipairs(refs) do
+                local id = tonumber(r[2]:match("^n(%d+)$"))
+                if id then questMobSet[id] = true end
+            end
+        end
+    end
+    return questMobSet[npc] == true
+end
+
+-- a quest in your log by its title (the nameplate tooltip names quests by title)
+local function QuestIDByTitle(title)
+    if type(title) ~= "string" then return nil end
+    for i = 1, (safe(C_QuestLog.GetNumQuestLogEntries) or 0) do
+        local info = safe(C_QuestLog.GetInfo, i)
+        if info and not info.isHeader and info.title == title and info.questID and not secret(info.questID) then
+            return info.questID
+        end
+    end
+end
+
 -- 3: remember where you saw it (your own position: its nameplate is up, so it's near)
 local function Learn(npc, name, quests)
     local map = C_Map.GetBestMapForUnit("player")
@@ -413,16 +467,30 @@ local function Learn(npc, name, quests)
         if s.q[q.quest] ~= v then s.q[q.quest] = v; linked = true end
     end
     local pts = s.m[map] or ""
+    local known = false
     for i = 1, #pts - 5, 6 do
         local px, py = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
-        if px and py and math.abs(px - x) < SEEN_GRID and math.abs(py - y) < SEEN_GRID then
-            if linked then M:Refresh() end
-            return
-        end
+        if px and py and math.abs(px - x) < SEEN_GRID and math.abs(py - y) < SEEN_GRID then known = true; break end
     end
-    if #pts >= SEEN_MAX * 6 then pts = pts:sub(7) end   -- oldest out
-    s.m[map] = pts .. ("%03d%03d"):format(x, y)
-    M:Refresh()   -- the markers use it from now on
+    if known then
+        if not linked then return end
+        M:Refresh()   -- a known spot, but it counts for a quest now: share that link (Sol review)
+    else
+        if #pts >= SEEN_MAX * 6 then pts = pts:sub(7) end   -- oldest out
+        s.m[map] = pts .. ("%03d%03d"):format(x, y)
+        M:Refresh()   -- the markers use it from now on
+    end
+    -- a new spot or a new quest link: other VoidQuest players get it too (ForeverShare: held
+    -- back, only what the shipped data lacks, used by them once 3 players agree)
+    -- (a rare that's no quest's mob isn't shared here: VoidSweep shares rares)
+    if VQ.Share and VQ.Share.FoundMob and ((quests and #quests > 0) or IsQuestMob(npc)) then
+        local sent = false
+        for _, q in ipairs(quests or {}) do
+            local qid = QuestIDByTitle(q.quest)
+            if qid then VQ.Share:FoundMob(npc, map, x, y, qid); sent = true end
+        end
+        if not sent then VQ.Share:FoundMob(npc, map, x, y, 0) end
+    end
 end
 
 -- (inView, the mobs in view, is declared near the top)
@@ -461,6 +529,10 @@ local function Mark(unit)
     else
         if icon then icon:Hide() end
         inView[unit] = nil
+        -- a quest mob for a quest you've done / don't have (the user, 2026-11-10: "what about
+        -- quests i already did"): no icon, but where it is helps everyone still on that quest
+        local npc = NpcID(unit)
+        if npc and name and IsQuestMob(npc) then Learn(npc, name, nil) end
     end
 end
 

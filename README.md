@@ -2,7 +2,7 @@
 
 **Works on:** WoW Midnight · WoW Forever
 
-> **WoW Forever players: please update to the latest version.** Versions from before November 8, 2026 use the old sharing channels, so they can't share with current players and aren't counted in the Players online box. The CurseForge app updates it for you; if you installed by hand, download the newest file.
+> **WoW Forever players: please update to the latest version.** Versions from before November 10, 2026 (0.3.19 and older) use the old sharing channel, so they can't share with current players and aren't counted in the Players online box. The CurseForge app updates it for you; if you installed by hand, download the newest file.
 
 **A quest guide that reads the game live: your campaign, your zone, and the quest nearest to you, on Midnight and WoW Forever.**
 
@@ -60,12 +60,12 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Density** — Min (important quests only: dungeon, elite and class quests, blue rewards, and chains that lead to them), Mid (plus every quest on a known chain) or Max (every quest, the default). It decides what the guide suggests next and which "!" the map shows; quests in your log always show.
 - **"!" on your map for quests you can take** — Forever's map shows none, so VoidQuest brings its own: thousands of quest givers ship with it, and it learns more as you play (where you picked a quest up, and every quest an NPC offers you, even ones you don't take).
 - **Too-high quests stay off the map** — quests five or more levels above you, and quests a giver didn't offer you yet (level or an earlier quest first). They come back as you level.
-- **Shared with other VoidQuest players** — when you find a quest giver, a few other VoidQuest players online learn it, and you learn theirs. A spot is only used once two players agree on it. See Privacy below.
+- **Shared with other VoidQuest players of your faction** — when you find a quest giver, a few other VoidQuest players online learn it, and you learn theirs. A spot is only used once two players agree on it. Horde and Alliance share separately (whispers don't cross factions, and the other side's quests are no use to you). See Privacy below.
 - **Ships with quest givers, turn-ins and chains** — from NorgannonDB, plus the spots VoidQuest players have confirmed. Where players' finds differ, they win.
 - **Players online box** — how many other VoidQuest players are online (shared with VoidGather and VoidSweep).
 - **Find your quest's mobs** — one marker on the minimap for each unfinished objective of the quest you're tracking: on the minimap's edge pointing the way while it's far, at the spot once you're close, gone when you're there. Red = mobs to kill, yellow = something that drops the item you need, blue = an object to use, pale gold = the game's own objective point. Hover it for the mob, the quest, your count and how far. `/vq dots` turns them off.
 - **Quest icon over nameplates** — a yellow **!** over every mob in view that counts for your unfinished objectives (the game's own quest data, so only the right ones), and a silver one over rares.
-- **Learns where mobs really are** — when a quest mob's nameplate shows up, VoidQuest remembers the spot (on your PC only), so the markers point at where they really are on Forever.
+- **Learns where mobs really are, together** — when a quest mob's nameplate shows up, VoidQuest remembers the spot, so the markers point at where they really are on Forever. Spots the shipped data doesn't have are shared with other VoidQuest players, and **once three players have seen a mob at the same spot, it's a marker for everyone**. Mobs of quests you've already done (or never took) count too: no icon for you, but their spots help everyone still on those quests.
 - **Pins to another continent** take the zeppelin, and the boats VoidGPS has learned when it's installed.
 
 ---
@@ -90,7 +90,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 | `/vq leftovers` | List quest items in your bags that nothing needs anymore, and why |
 | `/vq chains` | Grey quests in your log: starred (keep) or not, and why; on WoW Forever, how many quests here each density keeps |
 | `/vq drops` | Where your quests' items have come from (mobs and objects you looted) |
-| `/vq share` | WoW Forever: sharing quest givers on / off |
+| `/vq share` | WoW Forever: sharing (quest givers, rewards, quest-mob spots) on / off |
 | `/vq net` | WoW Forever: check that sharing gets through |
 | `/vq reset` | Put the panel back in the middle of the screen |
 
@@ -108,7 +108,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 ## Privacy & Data (WoW Forever sharing)
 
 - **What's sent:** a quest's ID, the quest giver's NPC ID and name, the map and the spot; and for a quest you're offered or turn in, its reward item IDs and the reputation it gives (faction and amount). Nothing about you or your character. Rewards and reputation are only used once two players agree on them.
-- **Not sent:** where you've seen mobs (that stays on your PC).
+- **Quest mobs:** for a spot the shipped data doesn't have, the mob's NPC ID, the map, the spot and the quest it counts for. Used once three players agree. Rares that aren't quest mobs aren't sent.
+- **Only to your own faction:** each faction has its own sharing channel.
 - **How:** by hidden addon whisper to a few other VoidQuest players online. It never shows in chat.
 - **Like any whisper, the players who get it can see which character sent it.** So your finds aren't sent live: they go out once you've left that map, or 10-20 minutes later, so they never show where you are right now.
 - **Other players' names are never saved.** Reports are counted with a one-way code so two reports from the same player don't count twice.
