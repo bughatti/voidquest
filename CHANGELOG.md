@@ -1,6 +1,17 @@
 # VoidQuest Changelog
 
-## 0.3.18
+## 0.3.19
+
+### WoW Forever: the Quest Book
+- **New: the Quest Book** — like the achievements window, for quests. The **Book** button on the panel (next to Zone), a key binding, or `/vq book`.
+  - **Every zone on the left** with your progress (done / total), grouped by Kalimdor, Eastern Kingdoms and dungeons.
+  - **Done, can do now, in your log, later**: filter buttons with counts. Quests far above your level are "later"; a grey **?** is a quest you're still on, a yellow **?** one that's ready to turn in.
+  - **Search quests by their rewards**: "off hand sword", "blue leather pants", "green cloak", "bag". Every word has to fit the same reward: its slot, weapon or armor type, quality (blue, green, purple...) or name. Quest names and zones work too.
+  - **Only what I can use** (on by default): leaves out rewards your class can't wear or wield.
+  - **Reward icons on every line**: hover for the item, shift-click to link, ctrl-click to try it on. Click the quest for the way to its giver.
+  - **Summary**: your progress overall and per continent, and the quests you can do now closest to your level.
+- **Only your faction's quests**: Blizzard's quest data leaves the faction blank on most Forever quests, so Horde players saw Ironforge and Darnassus quests (and Alliance players Orgrimmar ones). VoidQuest now knows each quest's side (from NorgannonDB), everywhere: the Quest Book, the zone list, the map's "!" and the quest box. Hidden test quests are gone too.
+- **Bags**: every quest that gives a bag, with its size ("12-slot bag", "8-slot quiver"), and the bags you can buy, normal and reagent bags (herb, mining, skinning), with price, the nearest vendor and the way there. Quest tooltips now say a bag's size.
 
 ### WoW Forever
 - **Find your quest's mobs:** one marker per unfinished objective on the minimap edge pointing the way while it's out of range, at the spot once in range, gone when you're there. Red = kill, yellow = drops the item, blue = object, pale gold = the game's own objective point.

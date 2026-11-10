@@ -178,6 +178,8 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         if VQ.Guide and VQ.Guide.ToggleCampaignSelect then VQ.Guide:ToggleCampaignSelect() end
     elseif msg == "quests" or msg == "myquests" or msg == "log" then
         if VQ.Guide and VQ.Guide.ToggleQuestLog then VQ.Guide:ToggleQuestLog() end
+    elseif msg == "book" then
+        if VQ.Book then VQ.Book:Toggle() else VQ:Print("the Quest Book is for WoW Forever.") end
     elseif msg == "fz" or (VQ.ForeverQuests and (msg == "zone" or msg == "zones")) then
         if VQ.Forever then VQ.Forever:Toggle() end   -- WoW Forever: every quest in the zone
     elseif msg == "zones" or msg == "zone" or msg == "leveling" then

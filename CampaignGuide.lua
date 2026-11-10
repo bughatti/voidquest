@@ -2690,12 +2690,24 @@ function mod:EnsurePanel()
             GameTooltip:AddLine("Every quest in this zone you can do: done, in your log, or still open. Click one to pin where it starts (when known). Known starts also show as a \"!\" on your world map.", 1, 1, 1, true)
             GameTooltip:Show()
         end)
+        -- the Quest Book (QuestBook.lua): every zone, done / can do, search by reward item
+        f.bookBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        f.bookBtn:SetSize(46, 18); f.bookBtn:SetPoint("TOPRIGHT", f.zoneBtn, "TOPLEFT", -3, 0)
+        f.bookBtn:SetText("Book")
+        f.bookBtn:SetScript("OnClick", function() if VQ.Book then VQ.Book:Toggle() end end)
+        f.bookBtn:SetScript("OnEnter", function(s)
+            GameTooltip:SetOwner(s, "ANCHOR_LEFT")
+            GameTooltip:AddLine("Quest Book")
+            GameTooltip:AddLine("Every quest in every zone: what you've done, what you can do now, what comes later. Search by quest, zone or reward item.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        f.bookBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
     -- in a group: Share = offer every quest someone in the group doesn't have (alt-click a
     -- quest line for just that one). The title gives up the room while it shows.
     f.shareBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.shareBtn:SetSize(46, 18); f.shareBtn:SetPoint("TOPRIGHT", f.zoneBtn, "TOPLEFT", -3, 0)
+    f.shareBtn:SetSize(46, 18); f.shareBtn:SetPoint("TOPRIGHT", f.bookBtn or f.zoneBtn, "TOPLEFT", -3, 0)
     f.shareBtn:SetText("Share")
     f.shareBtn:SetScript("OnClick", function() mod:ShareMissing() end)
     f.shareBtn:SetScript("OnEnter", function(s)
@@ -2708,7 +2720,7 @@ function mod:EnsurePanel()
     local function shareShown()
         local on = IsInGroup and IsInGroup() or false
         f.shareBtn:SetShown(on)
-        f.camp:SetWidth(PW() - (on and 250 or 200))
+        f.camp:SetWidth(PW() - (on and 250 or 200) - (f.bookBtn and 49 or 0))   -- Book button (Forever)
     end
     local gev = CreateFrame("Frame")
     gev:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -4111,7 +4123,7 @@ function mod:ApplyWidth()
     if not f or f._sizing or (InCombatLockdown() and f:IsProtected()) then return end
     local pw, cw = PW(), CW()
     if math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
-    f.camp:SetWidth(pw - ((f.shareBtn and f.shareBtn:IsShown()) and 250 or 200))   -- room for Share in a group
+    f.camp:SetWidth(pw - ((f.shareBtn and f.shareBtn:IsShown()) and 250 or 200) - (f.bookBtn and 49 or 0))   -- room for Share in a group, Book on Forever
     for _, fs in ipairs({ f.chapter, f.step, f.obj, f.side, f.meta, f.big }) do if fs then fs:SetWidth(cw) end end
     for _, row in ipairs(f.qRows or {}) do row:SetWidth(cw) end
     for _, row in ipairs(f.questRows or {}) do

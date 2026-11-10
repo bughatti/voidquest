@@ -1,0 +1,5 @@
+<Bindings>
+	<Binding name="VOIDQUEST_BOOK" header="VOIDQUEST">
+		if VoidQuest_ToggleBook then VoidQuest_ToggleBook() end
+	</Binding>
+</Bindings>

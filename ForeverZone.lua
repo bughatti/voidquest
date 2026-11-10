@@ -62,9 +62,32 @@ local function inList(list, v)
 end
 
 -- Can this character ever do it? (faction, class, race; level is not in the data)
+-- quest ID of a data row (built once): the faction table is keyed by ID, the callers pass rows
+local idOfRow
+local function IdOf(r)
+    if not idOfRow then
+        idOfRow = {}
+        for id, row in pairs(VQ.ForeverQuests or {}) do idOfRow[row] = id end
+    end
+    return idOfRow[r]
+end
+
 function F:Eligible(r)
     local m = Me()
-    if r[3] ~= "" and m.fac ~= "" and r[3] ~= m.fac then return false end
+    -- Blizzard leaves the faction blank on most Forever quests (the user, 2026-11-10, Horde: "i am seeing
+    -- quests for ironforge"); NorgannonDB's races fill it in (ForeverFaction.lua), and "X" = hidden
+    -- developer quests, for no one
+    local fac = r[3]
+    if fac == "" and VQ.ForeverFaction then
+        local id = IdOf(r)
+        local known = id and VQ.ForeverFaction[id]
+        if known == "X" then return false end
+        fac = known or ""
+    elseif VQ.ForeverFaction then
+        local id = IdOf(r)
+        if id and VQ.ForeverFaction[id] == "X" then return false end
+    end
+    if fac ~= "" and m.fac ~= "" and fac ~= m.fac then return false end
     if not inList(r[7], m.cls) then return false end
     if not inList(r[8], m.race) then return false end
     return true
@@ -81,11 +104,33 @@ end
 local levels, asked = {}, {}
 function F:Level(id)
     if levels[id] then return levels[id] end
+    -- kept across sessions (the Quest Book asks for thousands; a quest's level doesn't change)
+    local saved = VoidQuestDB and VoidQuestDB.qlv and VoidQuestDB.qlv[id]
+    if saved then levels[id] = saved; return saved end
     local lv = safe(C_QuestLog.GetQuestDifficultyLevel, id)
-    if lv and not Secret(lv) and lv > 0 then levels[id] = lv; return lv end
+    if lv and not Secret(lv) and lv > 0 then
+        levels[id] = lv
+        if VoidQuestDB then VoidQuestDB.qlv = VoidQuestDB.qlv or {}; VoidQuestDB.qlv[id] = lv end
+        return lv
+    end
     if not asked[id] and C_QuestLog.RequestLoadQuestByID then
         asked[id] = true
         safe(C_QuestLog.RequestLoadQuestByID, id)
+    end
+    return 0
+end
+
+-- The level if it's known already (cache, saved, or the client has it), WITHOUT asking the server:
+-- the Quest Book classifies 7,000 quests at once and asks for missing levels a few at a time.
+function F:KnownLevel(id)
+    if levels[id] then return levels[id] end
+    local saved = VoidQuestDB and VoidQuestDB.qlv and VoidQuestDB.qlv[id]
+    if saved then levels[id] = saved; return saved end
+    local lv = safe(C_QuestLog.GetQuestDifficultyLevel, id)
+    if lv and not Secret(lv) and lv > 0 then
+        levels[id] = lv
+        if VoidQuestDB then VoidQuestDB.qlv = VoidQuestDB.qlv or {}; VoidQuestDB.qlv[id] = lv end
+        return lv
     end
     return 0
 end
@@ -191,6 +236,107 @@ function F:ZoneList(zone)
     return out
 end
 
+-- The quest book (the user, 2026-11-10: "i dont see an achievements panel like retail to check if i have
+-- completed a quest ... i had to look online for other bag quests i can do at 31"): every zone at once,
+-- matched by quest title, zone or reward name; bags = quests that reward a bag (ForeverBags.lua, slot
+-- counts from Blizzard's item table). Levels are asked for only once the list is short, so typing one
+-- letter doesn't request 7,000 quests from the server.
+local LEVEL_ASK_MAX = 300
+function F:BagOf(r)
+    local B = VQ.ForeverBags
+    if not (B and r[11] and r[11] ~= "") then return nil end
+    local best, bestID
+    for tok in r[11]:gmatch("%d+") do
+        local b = B[tonumber(tok)]
+        if b and (not best or (b[2] == 0 and best[2] ~= 0) or (b[2] == best[2] and b[1] > best[1])) then
+            best, bestID = b, tonumber(tok)
+        end
+    end
+    return best, bestID   -- { slots, family }, itemID; normal bags preferred over quivers / pouches
+end
+
+function F:Search(text, bagsOnly)
+    text = (text or ""):lower()
+    local names = VQ.ForeverNames or {}
+    local out = {}
+    for id, r in pairs(VQ.ForeverQuests or {}) do
+        if self:Eligible(r) then
+            local bag = self:BagOf(r)
+            local ok = not bagsOnly or bag ~= nil
+            if ok and text ~= "" then
+                local zone = names[r[2]] or names[r[9]] or ""
+                ok = r[1]:lower():find(text, 1, true) or zone:lower():find(text, 1, true)
+                    or (r[10] or ""):lower():find(text, 1, true)
+            end
+            if ok then
+                out[#out + 1] = { id = id, title = r[1], flags = r[6], zone = names[r[2]] or names[r[9]], bag = bag }
+            end
+        end
+    end
+    local ask = #out <= LEVEL_ASK_MAX
+    for _, e in ipairs(out) do
+        local st = self:Status(e.id)
+        if st == "open" and ask then
+            -- grey (low-level) quests still count here: an old bag quest is still a bag
+            local avail, why = self:Available(e.id)
+            if not avail then
+                if (why or ""):find("^Low level") then e.low = true else st = "later" end
+            end
+        end
+        e.status = st
+        e.spot = self:Spot(e.id)
+        e.level = ask and self:Level(e.id) or 0
+    end
+    table.sort(out, function(a, b)
+        if a.status ~= b.status then return ORDER[a.status] < ORDER[b.status] end
+        if a.level ~= b.level then
+            if a.level == 0 or b.level == 0 then return a.level > b.level end
+            return a.level < b.level
+        end
+        return a.title < b.title
+    end)
+    return out, ask
+end
+
+-- Bags you can buy (VoidGPS's vendor lists): normal bags biggest first, then reagent / special bags.
+-- The user, 2026-11-10: "regeant bags also" (no reagent bag is a quest reward in Forever: vendors sell
+-- the Apprentice's Herb Pouch / Mining Pack / Skinning Satchel and the Herb Pouch, the rest is crafted).
+F.BAG_KIND = { [1] = "quiver", [2] = "ammo pouch", [4] = "soul bag", [8] = "leatherworking bag", [32] = "herb bag",
+    [64] = "enchanting bag", [128] = "engineering bag", [512] = "gem bag", [1024] = "mining bag",
+    [33554432] = "skinning bag" }
+function F:VendorBags()
+    local Goods = VoidGPS and VoidGPS.Goods
+    if not (Goods and Goods.Get and VQ.ForeverBags) then return {} end
+    local out = {}
+    for item, b in pairs(VQ.ForeverBags) do
+        local e = Goods:Get(item)
+        local v
+        for _, x in ipairs(e and e.vendors or {}) do if not x.cost then v = x; break end end
+        if v then
+            out[#out + 1] = { vendor = true, item = item, name = e.name, slots = b[1], family = b[2],
+                buy = e.buy, qty = e.qty or 1, v = v, limited = v.limited }
+        end
+    end
+    table.sort(out, function(a, b)
+        if (a.family == 0) ~= (b.family == 0) then return a.family == 0 end
+        if a.slots ~= b.slots then return a.slots > b.slots end
+        return (a.buy or 0) < (b.buy or 0)
+    end)
+    return out
+end
+
+local function VendorTooltip(owner, e)
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(e.item)
+    local coin = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or _G.GetCoinTextureString
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(("Sold by %s%s"):format(e.v.name, e.v.yards and (" (%d yd)"):format(e.v.yards) or ""), 0.6, 1, 0.6)
+    if e.buy and e.buy > 0 then GameTooltip:AddLine(coin and coin(e.buy) or GetMoneyString(e.buy), 1, 1, 1) end
+    if e.limited then GameTooltip:AddLine("Limited stock", 1, 0.5, 0.3) end
+    GameTooltip:AddLine("Click: the way to the vendor (VoidGPS)", 0.6, 0.6, 0.6)
+    GameTooltip:Show()
+end
+
 -- Zones with at least one quest this character can do, with done / total.
 function F:Zones()
     local out = {}
@@ -259,6 +405,13 @@ local function Tooltip(owner, id, anchor)
         GameTooltip:AddLine(coin and coin(info.money) or GetMoneyString(info.money), 1, 1, 1)
     end
     if info.rewards and info.rewards ~= "" then GameTooltip:AddLine(info.rewards, 0.8, 0.8, 0.8, true) end
+    -- a bag says how big it is (the user, 2026-11-10: "the bags dont say slots")
+    local bag, bagID = F:BagOf(VQ.ForeverQuests[id])
+    if bag then
+        local kind = bag[2] ~= 0 and (F.BAG_KIND and F.BAG_KIND[bag[2]] or "special bag") or "bag"
+        local name = bagID and safe(C_Item.GetItemNameByID, bagID)
+        GameTooltip:AddLine(("Bag: %d-slot %s%s"):format(bag[1], kind, name and (" (" .. name .. ")") or ""), 0.4, 1, 0.4)
+    end
     if VQ.Worth then VQ.Worth:AddTooltip(GameTooltip, id) end
     local giver = VQ.Starts and VQ.Starts:Giver(id)
     if giver then GameTooltip:AddLine("Given by " .. giver, 0.6, 1, 0.6) end
@@ -272,6 +425,8 @@ local function Tooltip(owner, id, anchor)
     end
     GameTooltip:Show()
 end
+
+F.QuestTooltip = Tooltip   -- the Quest Book uses the same tooltip
 
 ----------------------------------------------------------------------
 -- Window
@@ -308,6 +463,11 @@ local function Build()
     f.hideDone.label:SetPoint("LEFT", f.hideDone, "RIGHT", 0, 1); f.hideDone.label:SetText("Hide done & later")
     f.hideDone:SetScript("OnClick", function(b) VQ:Set("foreverHideDone", b:GetChecked() and true or false); F:Render() end)
 
+    -- the whole Quest Book (QuestBook.lua): every zone, done / can do, search by reward
+    f.bookBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.bookBtn:SetSize(50, 20); f.bookBtn:SetPoint("TOPRIGHT", -8, -28); f.bookBtn:SetText("Book")
+    f.bookBtn:SetScript("OnClick", function() if VQ.Book then VQ.Book:Toggle() end end)
+
     f.scroll = CreateFrame("ScrollFrame", nil, f, "FauxScrollFrameTemplate")
     f.scroll:SetPoint("TOPLEFT", 8, -54); f.scroll:SetPoint("BOTTOMRIGHT", -28, 10)
     f.scroll:SetScript("OnVerticalScroll", function(s, off) FauxScrollFrame_OnVerticalScroll(s, off, ROW_H, function() F:Render() end) end)
@@ -322,8 +482,13 @@ local function Build()
         row.text:SetPoint("LEFT", 2, 0); row.text:SetPoint("RIGHT", -60, 0); row.text:SetJustifyH("LEFT"); row.text:SetWordWrap(false)
         row.right = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         row.right:SetPoint("RIGHT", -2, 0); row.right:SetWidth(58); row.right:SetJustifyH("RIGHT")
-        row:SetScript("OnClick", function(s) if s.id then F:Go(s.id) end end)
-        row:SetScript("OnEnter", function(s) if s.id then Tooltip(s, s.id) end end)
+        row:SetScript("OnClick", function(s)
+            if s.id then F:Go(s.id)
+            elseif s.vend and VoidGPS and VoidGPS.Goods then VoidGPS.Goods:GoVendor(s.vend.v, s.vend.name) end
+        end)
+        row:SetScript("OnEnter", function(s)
+            if s.id then Tooltip(s, s.id) elseif s.vend then VendorTooltip(s, s.vend) end
+        end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         f.rows[i] = row
     end
@@ -349,6 +514,7 @@ function F:Render()
     for i, row in ipairs(win.rows) do
         local e = list[off + i]
         row.id = e and e.id
+        row.vend = nil
         if e then
             local lv = e.level > 0 and ("[" .. e.level .. "] ") or ""
             local tag = ""
