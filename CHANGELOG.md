@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.17
+
+- **WoW Forever: the quest's own rewards, for you.** The box beside the quest window now reads the rewards straight from the quest window and says which are for your character: "Rewards for you: Quilboar Blaster", or "Rewards: none for your Rogue (mail, shields)". A blue reward you can use makes it **worth it for you**. Blizzard's quest data has no rewards for many quests (A Vengeful Fate showed "nothing lasting" even though it offers a blue gun).
+
 ## 0.3.16
 
 - **WoW Forever: dungeon or out in the world?** The box beside the quest window now starts with what kind of quest it is: **Dungeon quest: Wailing Caverns (bring a group)**, **Raid quest**, **Elite quest: hard to solo**, or **Regular quest, out in the world (solo)**. When a later quest in the chain goes into a dungeon, the chain line says so: "Goes into: Razorfen Kraul". Elite quests inside a dungeon that Blizzard's data doesn't tag as dungeon quests (Waking Naralex, Vorrel's Revenge...) count as dungeon quests.

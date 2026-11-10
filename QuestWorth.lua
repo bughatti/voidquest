@@ -580,6 +580,43 @@ local function ShowBox()
         return
     end
     local lines, good, own, pending = W:Lines(qid, true)
+    -- The rewards the quest window shows (the game's own list): Blizzard's quest data has none
+    -- for many quests (A Vengeful Fate: Berylline Pads / Stonefist Girdle, the user 2026-11-09).
+    local forMe, notWhy, liveN = {}, {}, 0
+    for _, kind in ipairs({ "reward", "choice" }) do
+        local n = (kind == "reward" and GetNumQuestRewards and GetNumQuestRewards())
+            or (kind == "choice" and GetNumQuestChoices and GetNumQuestChoices()) or 0
+        for i = 1, n do
+            local link = GetQuestItemLink and GetQuestItemLink(kind, i)
+            local id = link and C_Item.GetItemInfoInstant(link)
+            if id then
+                local k, why = Kind(id)
+                if k == nil then
+                    pending = true
+                elseif k ~= "other" then
+                    liveN = liveN + 1
+                    if k == "mine" then
+                        forMe[#forMe + 1] = ItemName(id) or link
+                        if Quality(id) >= 3 then good = true end
+                    elseif why then
+                        notWhy[why] = true
+                    end
+                end
+            end
+        end
+    end
+    if liveN > 0 then
+        own = {}   -- the window's own list replaces the data's guess
+        if #forMe > 0 then
+            lines[#lines + 1] = "|cff3ddc84Rewards for you:|r " .. table.concat(forMe, ", ")
+        else
+            local w = {}
+            for k in pairs(notWhy) do w[#w + 1] = k end
+            table.sort(w)
+            lines[#lines + 1] = ("|cffaaaaaaRewards: none for your %s%s|r"):format(UnitClass("player") or "class",
+                #w > 0 and (" (" .. table.concat(w, ", ") .. ")") or "")
+        end
+    end
     if #lines == 0 and #own == 0 and not pending then
         -- nothing beyond the quest itself: say that too (the user, 2026-11-09: a blue "?"
         -- repeatable showed no box at all)
