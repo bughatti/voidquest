@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.3.16
+
+- **WoW Forever: dungeon or out in the world?** The box beside the quest window now starts with what kind of quest it is: **Dungeon quest: Wailing Caverns (bring a group)**, **Raid quest**, **Elite quest: hard to solo**, or **Regular quest, out in the world (solo)**. When a later quest in the chain goes into a dungeon, the chain line says so: "Goes into: Razorfen Kraul". Elite quests inside a dungeon that Blizzard's data doesn't tag as dungeon quests (Waking Naralex, Vorrel's Revenge...) count as dungeon quests.
+- **The box shows on every quest now**, also when there's nothing more to it: "Repeatable. No follow-up quest and no reputation: only its own reward (Bloodbelly Fish)". Before, it stayed hidden.
+- **Which reputation, and how much:** faction lines say the amount the quest gives, "Undercity +100 (you: Friendly)...". A quest's reputation is set per quest, not by who gives it, so an Orgrimmar orc's quest can pay Undercity.
+
 ## 0.3.15
 
 - **WoW Forever: reputation discounts.** At **Honored**, a faction's vendors and trainers charge you **10% less**. We measured it in game: full price at Friendly, exactly 10% off at Honored, the same as Classic. The quest window's box now says so for a quest that gives reputation with a capital, a goblin town or a faction with a reputation vendor, until you're Honored: "Thunder Bluff (you: Friendly): at Honored, 10% off its vendors". For your own race's capital it adds **your riding skill and mount too**, the biggest purchase while leveling.

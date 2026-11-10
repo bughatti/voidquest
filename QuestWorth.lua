@@ -340,7 +340,7 @@ end
 
 -- negatives: also say when a faction has nothing for you (the quest-giver box only;
 -- tooltips show only what's for you).
-function W:FactionLine(fid, negatives)
+function W:FactionLine(fid, negatives, gain)
     if not VQ.ForeverRepScanned then return nil end   -- no scan shipped: don't guess
     local name = VQ.ForeverFactions and VQ.ForeverFactions[fid]
     if not name then return nil end
@@ -349,15 +349,18 @@ function W:FactionLine(fid, negatives)
     local s = Faction(fid)
     local you = mine and (" (you: " .. STANDING_NAME[mine] .. ")") or ""
     local disc = negatives and DiscountText(fid, name, mine)
+    -- the box names the amount: the faction is the quest's reward, not the giver's own
+    -- (the user, 2026-11-09: "why does it say undercity when this npc is ogrimar")
+    local label = (negatives and gain) and (name .. " +" .. gain) or name
     if s.mine > 0 and negatives then
         -- the quest-giver box: the items themselves, next standing first (the user,
         -- 2026-11-09: "if i ... get revered, they may have a melee weapon i can buy")
-        local d = self:FactionDetail(name, s, mine, you)
+        local d = self:FactionDetail(label, s, mine, you)
         if disc then d = d .. "\n   |cffffd100Honored:|r " .. disc end
         return d, true
     end
     if disc and s.pending == 0 then
-        return ("|cffffd100%s|r%s: at Honored, %s"):format(name, you, disc)
+        return ("|cffffd100%s|r%s: at Honored, %s"):format(label, you, disc)
     end
     if s.mine > 0 then
         local best = s.best and ItemName(s.best[1])
@@ -370,16 +373,54 @@ function W:FactionLine(fid, negatives)
     if not negatives or HOME[fid] then return nil end                   -- tooltip / capital
     if s.total > 0 then
         local why = MainWhy(s)
-        return ("|cff999999%s: nothing for your %s%s|r"):format(name, UnitClass("player") or "class",
+        return ("|cff999999%s: nothing for your %s%s|r"):format(label, UnitClass("player") or "class",
             why and (" (" .. why .. ")") or "")
     end
-    return ("|cff999999%s: nothing to buy, reputation only|r"):format(name)
+    return ("|cff999999%s: nothing to buy, reputation only|r"):format(label)
 end
 
 ----------------------------------------------------------------------
 -- The rest of the chain
 ----------------------------------------------------------------------
 local chainCache = {}
+
+-- Dungeon or out in the world? (the user, 2026-11-09: "whether a quest or questline i am
+-- doing is for regular quests or for a dungeon"). Blizzard's data tags dungeon / raid
+-- quests, but not all of them (Wailing Caverns' Waking Naralex is only "Elite"), so a zone
+-- where most quests are dungeon quests counts as a dungeon too (not Stormwind City, which
+-- has a few dungeon quests among hundreds).
+local dungeonZones
+local function DungeonZones()
+    if dungeonZones then return dungeonZones end
+    local tot, dr = {}, {}
+    for _, r in pairs(VQ.ForeverQuests or {}) do
+        local z = r[2]
+        if z and z > 0 then
+            tot[z] = (tot[z] or 0) + 1
+            if (r[6] or ""):find("[DR]") then dr[z] = (dr[z] or 0) + 1 end
+        end
+    end
+    dungeonZones = {}
+    -- 60%: Wailing Caverns 9/12 and Shadowfang Keep 3/5 are in; Orgrimmar 69/133 and
+    -- Ironforge 69/124 (war-effort / attunement quests) are not (checked on the data, 2026-11-09)
+    for z, n in pairs(dr) do
+        if n >= 2 and n * 5 >= tot[z] * 3 then dungeonZones[z] = true end
+    end
+    return dungeonZones
+end
+
+-- "raid" | "dungeon" | "elite" | nil (regular), and the dungeon's name when known.
+-- The zone rule only turns an ELITE quest into a dungeon quest (Waking Naralex).
+local function QuestKind(r)
+    local f = r[6] or ""
+    local inDungeonZone = DungeonZones()[r[2]]
+    local zname = inDungeonZone and VQ.ForeverNames and VQ.ForeverNames[r[2]] or nil
+    if f:find("R") then return "raid", zname end
+    if f:find("D") or (inDungeonZone and f:find("E")) then return "dungeon", zname end
+    if f:find("E") then return "elite" end
+    return nil
+end
+W.QuestKind = QuestKind
 local MAX_NODES = 200
 
 -- Payoffs of one quest for you: adds short texts to out. Returns true while some reward's
@@ -422,6 +463,7 @@ function W:ChainLine(qid)
     if not (C and C.NextOf) then return nil end
     local seen, queue, head = { [qid] = true }, { qid }, 1
     local n, xp, pay, pending, probable, cut = 0, 0, {}, false, false, false
+    local into, intoSeen = {}, {}   -- dungeons / raids further down the chain
     while head <= #queue and not cut do
         local a = queue[head]
         head = head + 1
@@ -436,6 +478,11 @@ function W:ChainLine(qid)
                 if (v or 0) < 2 then probable = true end   -- a link only guessed from quest history
                 xp = xp + (r[4] or 0)
                 if Payoffs(b, pay) then pending = true end
+                local k, place = QuestKind(r)
+                if k == "dungeon" or k == "raid" then
+                    place = place or (k == "raid" and "a raid" or "a dungeon")
+                    if not intoSeen[place] then intoSeen[place] = true; into[#into + 1] = place end
+                end
                 queue[#queue + 1] = b
             end
         end
@@ -445,6 +492,9 @@ function W:ChainLine(qid)
         local num = BreakUpLargeNumbers and BreakUpLargeNumbers(xp) or tostring(xp)
         line = ("%s: %d quest%s%s"):format(probable and "Probably still in the chain" or "Rest of the chain",
             n, n == 1 and "" or "s", xp > 0 and (", " .. num .. " XP") or "")
+        if #into > 0 then
+            line = line .. ". |cffff8040Goes into:|r " .. table.concat(into, ", ", 1, math.min(2, #into))
+        end
         if #pay > 0 then
             local shown = {}
             for i = 1, math.min(3, #pay) do shown[i] = pay[i] end
@@ -480,7 +530,7 @@ function W:Lines(qid, negatives)
     table.sort(gains, function(a, b) return a[2] > b[2] end)
     for _, g in ipairs(gains) do
         if #lines >= 3 then break end
-        local l, fgood, fpend = self:FactionLine(g[1], negatives)
+        local l, fgood, fpend = self:FactionLine(g[1], negatives, g[2])
         if fpend then pending = true end
         if l then lines[#lines + 1] = l; good = good or fgood end
     end
@@ -524,10 +574,21 @@ local function ShowBox()
         if box then box:Hide() end
         return
     end
-    local lines, good, own, pending = W:Lines(qid, true)
-    if #lines == 0 and #own == 0 and not pending then
+    local r = VQ.ForeverQuests and VQ.ForeverQuests[qid]
+    if not r then   -- not a WoW Forever quest we know: nothing to judge
         if box then box:Hide() end
         return
+    end
+    local lines, good, own, pending = W:Lines(qid, true)
+    if #lines == 0 and #own == 0 and not pending then
+        -- nothing beyond the quest itself: say that too (the user, 2026-11-09: a blue "?"
+        -- repeatable showed no box at all)
+        local f = r[6] or ""
+        local kind = f:find("d") and "Daily. " or f:find("w") and "Weekly. " or f:find("r") and "Repeatable. " or ""
+        local rew = (r[10] and r[10] ~= "") and (" (" .. r[10] .. ")") or ""
+        -- it may give capital reputation you're already Honored with: that buys nothing more
+        local rep = (r[12] and r[12]:find("%d+:%d")) and "no reputation that gets you anything more" or "no reputation"
+        lines = { ("|cffaaaaaa%sNo follow-up quest and %s: only its own reward%s.|r"):format(kind, rep, rew) }
     end
     local b = Box()
     b:ClearAllPoints()
@@ -541,7 +602,18 @@ local function ShowBox()
         b.title:SetText("|cff00c7ffVoidQuest:|r |cffbbbbbbnothing lasting for you|r")
     end
     local body = {}
-    if #own > 0 then body[1] = "|cff3ddc84This quest:|r " .. table.concat(own, ", ") end
+    -- first: dungeon / raid / elite / regular
+    local k, place = QuestKind(r)
+    if k == "raid" then
+        body[1] = "|cffff4040Raid quest|r" .. (place and (": " .. place) or "")
+    elseif k == "dungeon" then
+        body[1] = "|cffff8040Dungeon quest|r" .. (place and (": " .. place) or "") .. " |cffaaaaaa(bring a group)|r"
+    elseif k == "elite" then
+        body[1] = "|cffffd100Elite quest:|r |cffaaaaaahard to solo, bring a group|r"
+    else
+        body[1] = "|cffaaaaaaRegular quest, out in the world (solo)|r"
+    end
+    if #own > 0 then body[#body + 1] = "|cff3ddc84This quest:|r " .. table.concat(own, ", ") end
     for _, l in ipairs(lines) do body[#body + 1] = l end
     b.text:SetText(table.concat(body, "\n"))
     b:SetHeight(b.title:GetStringHeight() + b.text:GetStringHeight() + 25)
