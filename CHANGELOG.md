@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.15
+
+- **WoW Forever: reputation discounts.** At **Honored**, a faction's vendors and trainers charge you **10% less**. We measured it in game: full price at Friendly, exactly 10% off at Honored, the same as Classic. The quest window's box now says so for a quest that gives reputation with a capital, a goblin town or a faction with a reputation vendor, until you're Honored: "Thunder Bluff (you: Friendly): at Honored, 10% off its vendors". For your own race's capital it adds **your riding skill and mount too**, the biggest purchase while leveling.
+
 ## 0.3.14
 
 - **WoW Forever: is this quest worth it for you?** When an NPC offers you a quest, a box beside the quest window says **worth it for you** (green) or **nothing lasting for you** (grey), for your character, and why:

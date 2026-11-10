@@ -320,6 +320,24 @@ function W:FactionDetail(name, s, mine, you)
     return table.concat(out, "\n")
 end
 
+-- Reputation discount (measured on WoW Forever 2026-11-09, Classic rule): Honored = 10% off
+-- that faction's vendors and trainers (Kor'geld, Orgrimmar: every item 0.900 of base);
+-- Friendly = full price (Hogor Thunderhoof, Thunder Bluff: 1.000). The user: "that would be
+-- something important for people to know". Your race's capital also trains your riding skill
+-- and sells your mount, the biggest purchase while leveling.
+local VENDOR_TOWNS = { [76] = 1, [530] = 1, [68] = 1, [81] = 1, [72] = 1, [47] = 1, [69] = 1, [54] = 1,
+                       [21] = 1, [470] = 1, [369] = 1, [577] = 1 }   -- capitals + goblin towns
+local RACE_CAPITAL = { Orc = 76, Troll = 530, Tauren = 81, Scourge = 68, Human = 72, Dwarf = 47, Gnome = 54, NightElf = 69 }
+local function DiscountText(fid, name, mine)
+    if not mine or mine >= 6 then return nil end   -- unknown, or you have it already
+    if not (VENDOR_TOWNS[fid] or (VQ.ForeverRep and VQ.ForeverRep[name])) then return nil end
+    local _, race = UnitRace("player")
+    if RACE_CAPITAL[race] == fid and (UnitLevel("player") or 0) < 60 then
+        return "10% off its vendors and trainers, your riding skill and mount too"
+    end
+    return "10% off its vendors"
+end
+
 -- negatives: also say when a faction has nothing for you (the quest-giver box only;
 -- tooltips show only what's for you).
 function W:FactionLine(fid, negatives)
@@ -330,10 +348,16 @@ function W:FactionLine(fid, negatives)
     if mine and mine >= 8 then return nil end         -- already Exalted: nothing more to earn
     local s = Faction(fid)
     local you = mine and (" (you: " .. STANDING_NAME[mine] .. ")") or ""
+    local disc = negatives and DiscountText(fid, name, mine)
     if s.mine > 0 and negatives then
         -- the quest-giver box: the items themselves, next standing first (the user,
         -- 2026-11-09: "if i ... get revered, they may have a melee weapon i can buy")
-        return self:FactionDetail(name, s, mine, you), true
+        local d = self:FactionDetail(name, s, mine, you)
+        if disc then d = d .. "\n   |cffffd100Honored:|r " .. disc end
+        return d, true
+    end
+    if disc and s.pending == 0 then
+        return ("|cffffd100%s|r%s: at Honored, %s"):format(name, you, disc)
     end
     if s.mine > 0 then
         local best = s.best and ItemName(s.best[1])
