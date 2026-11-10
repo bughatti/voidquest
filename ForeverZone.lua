@@ -40,7 +40,7 @@ function F:Info(id)
     return {
         id = id, title = r[1], zone = names[r[2]], faction = r[3], xp = r[4], money = r[5],
         flags = r[6], classes = r[7], races = r[8], group = names[r[9]], rewards = r[10],
-        rewardIDs = r[11],
+        rewardIDs = r[11], reps = r[12] or "", spell = r[13] or 0, needRep = r[14] or "",
     }
 end
 
@@ -259,6 +259,7 @@ local function Tooltip(owner, id, anchor)
         GameTooltip:AddLine(coin and coin(info.money) or GetMoneyString(info.money), 1, 1, 1)
     end
     if info.rewards and info.rewards ~= "" then GameTooltip:AddLine(info.rewards, 0.8, 0.8, 0.8, true) end
+    if VQ.Worth then VQ.Worth:AddTooltip(GameTooltip, id) end
     local giver = VQ.Starts and VQ.Starts:Giver(id)
     if giver then GameTooltip:AddLine("Given by " .. giver, 0.6, 1, 0.6) end
     GameTooltip:AddLine(" ")

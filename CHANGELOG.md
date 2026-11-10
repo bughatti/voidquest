@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.14
+
+- **WoW Forever: is this quest worth it for you?** When an NPC offers you a quest, a box beside the quest window says **worth it for you** (green) or **nothing lasting for you** (grey), for your character, and why:
+  - **The rest of the chain:** how many quests are left, how much XP, and what it leads to (an ability, a blue item you can use, a mount, a key), or "nothing lasting after it".
+  - **The factions it gives reputation with:** what each one sells or unlocks for you and at which standing, next standing first, for example "Revered: <item> (one-handed sword)". "For you" means your weapon types and armor, not caster-only gear on a melee class (or the other way round), recipes for your professions, and mounts. A faction with nothing for you says so ("nothing for your Rogue (caster gear)"), and one that sells nothing says "reputation only". Your home cities are left out of that, since they're on almost every quest.
+  - Hovering a quest line in the panel, the zone list or a map "!" shows the short version.
+  - Which items need a standing comes from WoW Forever's own item tooltips, read for every vendor item (318 items across 19 factions).
+
 ## 0.3.13
 
 - **Nothing about other players is saved any more:** the short list of players who had just logged off (it kept the online count right after a reload) now lasts only for your session, and the old saved list is deleted.

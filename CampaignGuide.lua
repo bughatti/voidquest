@@ -3579,6 +3579,8 @@ local function QuestTipWithGroup(qid, zone, groupNames, clickHint)
         if VQ.Drops then VQ.Drops:AddQuestLines(GameTooltip, qid) end
         -- grey quests: worth keeping, or low value (Chains.lua)
         if VQ.Chains then VQ.Chains:AddTooltip(GameTooltip, qid) end
+        -- WoW Forever: what the rest of the chain and the reputation are worth to you (QuestWorth.lua)
+        if VQ.Worth then VQ.Worth:AddTooltip(GameTooltip, qid) end
         GameTooltip:Show()   -- resize for the added lines
     end
 end
