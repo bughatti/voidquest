@@ -39,9 +39,9 @@ end
 -- every STALE_FOR seconds: QUEST_LOG_UPDATE fires on every kill, and the Forever zone
 -- list grades a whole zone (Min/Mid). Turn-ins, accepts and new links redo them at once.
 local STALE_FOR = 2
-local gradeCache, ownCache, prevOf = {}, {}, nil
+local gradeCache, ownCache, prevOf, prevList = {}, {}, nil, nil
 local stale, lastInv = false, 0
-local function Invalidate() gradeCache, ownCache, prevOf, stale, lastInv = {}, {}, nil, false, GetTime() end
+local function Invalidate() gradeCache, ownCache, prevOf, prevList, stale, lastInv = {}, {}, nil, nil, false, GetTime() end
 local function Fresh() if stale and GetTime() - lastInv >= STALE_FOR then Invalidate() end end
 
 -- strength: 2 = confirmed (the follow-up window opened by itself, no other window in
@@ -266,6 +266,33 @@ local function NextOf(a)
     return out
 end
 C.NextOf = NextOf
+
+-- The quest that has to be done before this one, when you haven't done it (the user, 11-11: a "!" for the
+-- third "The Swarm Grows" at Moktar Krin, who only offers it after the first two). Confirmed links only
+-- (the seed's are NorgannonDB prerequisites + chains, and links seen live). Any one earlier quest
+-- turned in is enough (quests with several ways in). Returns the earlier quest id, or nil.
+function C:Earlier(qid)
+    Fresh()
+    if not prevList then
+        prevList = {}
+        local function add(a, t)
+            for b, v in pairs(t) do
+                if (tonumber(v) or 0) >= 2 then prevList[b] = prevList[b] or {}; table.insert(prevList[b], a) end
+            end
+        end
+        for a, t in pairs(VQ.ForeverChains or {}) do add(a, t) end
+        for a, t in pairs(DB()) do add(a, t) end
+    end
+    local ps = prevList[qid]
+    if not ps then return nil end
+    local first
+    for _, a in ipairs(ps) do
+        local ok, done = pcall(C_QuestLog.IsQuestFlaggedCompleted, a)
+        if ok and done == true then return nil end
+        first = first or a
+    end
+    return first
+end
 
 -- The first quest down a known chain that matters, with why ("probably" when a link on
 -- the way is only probable); plus the first follow-up known at all. The whole reachable

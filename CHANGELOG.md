@@ -1,5 +1,12 @@
 # VoidQuest Changelog
 
+## 0.3.25
+
+- **WoW Forever: only quests you can take get a "!".** VoidQuest now checks what every quest needs before its giver offers it: your level, class and race, an earlier quest, a profession skill or a reputation. A quest for another class or race, or one closed off by a quest you did, no longer shows; a quest you can't take yet waits, and the zone list says why ("Needs level 30", "Needs Honored with ...").
+- **A grey "!" for quests that need an earlier quest somewhere else**, at the giver: hover it for "Go get *The Swarm Grows* from Korran in The Barrens first", click it for the way there. It names the first step you still need, even several quests back.
+- Escort quests (like Free at Last) show again; a data flag had hidden them as holiday quests.
+- **The Void hub button opens one panel now:** every Void addon you have by name, grouped, with its on/off switches under it, and a Background slider. It replaces the ring of unnamed icons.
+
 ## 0.3.24
 
 - **Share one quest at a time.** The Share button is gone (it offered your whole log to everyone in the group). In a group, a small green **S** now sits at the end of each quest line that someone in your group doesn't have: click it to share just that quest, hover it to see who's missing it.

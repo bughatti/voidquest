@@ -90,6 +90,9 @@ function F:Eligible(r)
     if fac ~= "" and m.fac ~= "" and fac ~= m.fac then return false end
     if not inList(r[7], m.cls) then return false end
     if not inList(r[8], m.race) then return false end
+    -- not for this character at all (another class or race, closed off): F:Rule
+    local id = IdOf(r)
+    if id and self:Rule(id) == "never" then return false end
     return true
 end
 
@@ -164,6 +167,155 @@ local function lowLevelHidden(id)
     return t and true or false
 end
 
+----------------------------------------------------------------------
+-- What a quest needs before its giver offers it (ForeverRules.lua, from NorgannonDB:
+-- tools/cmd/vq-rules). The user, 2026-11-11: a "!" for the third "The Swarm Grows" at a
+-- giver who only offers it after the first two; "we need to fix anything like this through
+-- all the quests". F:Rule(id) -> kind, reason:
+--   "never": not for this character (another class or race, past its max level, closed by a
+--            quest you did, a lead-in whose quest you already have): no "!", not listed
+--   "later": not yet (level, an earlier quest, profession skill, reputation, a holiday)
+--   nil:     nothing in the way
+----------------------------------------------------------------------
+local function bitSet(mask, id)
+    if not (mask and id and id > 0) then return true end
+    return math.floor(mask / 2 ^ (id - 1)) % 2 == 1
+end
+local function doneQ(q) return safe(C_QuestLog.IsQuestFlaggedCompleted, q) == true end
+local function inLogQ(q) return safe(C_QuestLog.GetLogIndexForQuestID, q) ~= nil end
+local function titleQ(q)
+    local t = C_QuestLog.GetTitleForQuestID and safe(C_QuestLog.GetTitleForQuestID, q)
+    if (not t or t == "") and VQ.ForeverQuests and VQ.ForeverQuests[q] then t = VQ.ForeverQuests[q][1] end
+    return t and ("\"" .. t .. "\"") or "an earlier quest"
+end
+-- the first step still to do back down a chain (1147 -> 1146 -> 1145)
+local function undonePrev(rr)
+    if not rr then return nil end
+    for _, q in ipairs(rr.pa or {}) do if not doneQ(q) then return q end end
+    if rr.py then
+        for _, q in ipairs(rr.py) do if doneQ(q) then return nil end end
+        return rr.py[1]
+    end
+end
+-- the first quest still to do down a chain of earlier quests (1147 -> 1146 -> 1145)
+local function firstStep(q)
+    local start = q
+    for _ = 1, 10 do
+        local p = undonePrev(VQ.ForeverRules and VQ.ForeverRules[q])
+        if not p or p == start then break end
+        q = p
+    end
+    return q
+end
+F.FirstStep = function(_, q) return firstStep(q) end
+local function needsText(q)
+    q = firstStep(q)
+    if inLogQ(q) then return ("Finish and turn in %s first (it's in your log)"):format(titleQ(q)) end
+    local s = VQ.Starts and VQ.Starts:Get(q)
+    local zone = s and s.m and C_Map.GetMapInfo(s.m)
+    local giver = VQ.Starts and VQ.Starts.Giver and VQ.Starts:Giver(q)
+    local where = {}
+    if giver then where[#where + 1] = "from " .. giver end
+    if zone and zone.name then where[#where + 1] = "in " .. zone.name end
+    return ("Needs %s %sfirst"):format(titleQ(q), #where > 0 and (table.concat(where, " ") .. " ") or "")
+end
+local SKILL = { [129] = "First Aid", [164] = "Blacksmithing", [165] = "Leatherworking", [171] = "Alchemy",
+    [182] = "Herbalism", [185] = "Cooking", [186] = "Mining", [197] = "Tailoring", [202] = "Engineering",
+    [333] = "Enchanting", [356] = "Fishing", [393] = "Skinning", [755] = "Jewelcrafting", [773] = "Inscription" }
+local function mySkill(line)
+    if not (GetProfessions and GetProfessionInfo) then return nil end
+    local raw = { pcall(GetProfessions) }   -- up to 6 (Cooking, Fishing, First Aid last): not safe(), which keeps 3
+    if not raw[1] then return nil end
+    table.remove(raw, 1)
+    for i = 1, 6 do
+        local idx = raw[i]
+        if idx then
+            local ok, _, _, rank, _, _, _, l = pcall(GetProfessionInfo, idx)
+            if ok and l == line then return rank or 0 end
+        end
+    end
+    return 0   -- not learned
+end
+local STANDING = { "Hated", "Hostile", "Unfriendly", "Neutral", "Friendly", "Honored", "Revered", "Exalted" }
+local function standingOfRaw(v)
+    if v >= 42000 then return 8 elseif v >= 21000 then return 7 elseif v >= 9000 then return 6
+    elseif v >= 3000 then return 5 elseif v >= 0 then return 4 elseif v >= -3000 then return 3
+    elseif v >= -6000 then return 2 end
+    return 1
+end
+-- standing tier (1-8), the faction's name, and raw reputation points when the game gives them
+-- (Codex 11-11: tiers alone let 3000 rep pass a 5000 requirement, both Friendly)
+local function myStanding(fid)
+    local d = C_Reputation and C_Reputation.GetFactionDataByID and safe(C_Reputation.GetFactionDataByID, fid)
+    local r = d and d.reaction
+    if type(r) == "number" and not Secret(r) then
+        local raw = d.currentStanding
+        if type(raw) ~= "number" or Secret(raw) then raw = nil end
+        return r, d.name, raw
+    end
+end
+
+-- a holiday on the calendar today (Darkmoon Faire, Lunar Festival, ...). Unknown (no calendar data)
+-- counts as yes: a holiday quest is only held back when the calendar says nothing is on (Codex 11-11)
+local holidayAt, holidayOn = 0, true
+local function holidayToday()
+    if GetTime() - holidayAt < 60 then return holidayOn end
+    holidayAt = GetTime()
+    local t = C_DateAndTime and C_DateAndTime.GetCurrentCalendarTime and safe(C_DateAndTime.GetCurrentCalendarTime)
+    local n = t and C_Calendar and C_Calendar.GetNumDayEvents and safe(C_Calendar.GetNumDayEvents, 0, t.monthDay)
+    if type(n) ~= "number" or n == 0 then holidayOn = true; return true end
+    holidayOn = false
+    for i = 1, n do
+        local e = safe(C_Calendar.GetDayEvent, 0, t.monthDay, i)
+        -- an event we can't read is unknown: don't hold holiday quests back (Codex 11-11)
+        if not e or e.calendarType == "HOLIDAY" then holidayOn = true; break end
+    end
+    return holidayOn
+end
+
+function F:Rule(id)
+    local rr = VQ.ForeverRules and VQ.ForeverRules[id]
+    if not rr then return nil end
+    local _, _, cls = UnitClass("player")
+    local _, _, race = UnitRace("player")
+    if rr.c and not bitSet(rr.c, cls) then return "never", "For another class" end
+    if rr.r and not bitSet(rr.r, race) then return "never", "For other races" end
+    local lvl = UnitLevel("player") or 0
+    if rr.xl and lvl > rr.xl then return "never", ("Only up to level %d"):format(rr.xl) end
+    if rr.db and doneQ(rr.db) then return "never", "Closed: you did " .. titleQ(rr.db) end
+    for _, q in ipairs(rr.ex or {}) do
+        if doneQ(q) or inLogQ(q) then return "never", "Can't do both: you did or took " .. titleQ(q) end
+    end
+    if rr.bf and (doneQ(rr.bf) or inLogQ(rr.bf)) then
+        return "never", "A lead-in for " .. titleQ(rr.bf) .. ", which you already have"
+    end
+    if rr.rx then
+        local mine, _, raw = myStanding(rr.rx[1])
+        local past = (raw and raw > rr.rx[2]) or (not raw and mine and mine > standingOfRaw(rr.rx[2]))
+        if past then return "never", "Your reputation is past what it allows" end
+    end
+    if rr.hol and not holidayToday() then return "later", "A holiday quest: only while its holiday is on" end
+    if rr.ml and lvl < rr.ml then return "later", ("Needs level %d"):format(rr.ml) end
+    if undonePrev(rr) then return "later", needsText(id), firstStep(id) end   -- 3rd: where to go first
+    if rr.sk then
+        local have = mySkill(rr.sk[1])
+        if have and have < rr.sk[2] then
+            return "later", ("Needs %s %d"):format(SKILL[rr.sk[1]] or "a profession", rr.sk[2])
+        end
+    end
+    if rr.rp then
+        local mine, name, raw = myStanding(rr.rp[1])
+        local need = standingOfRaw(rr.rp[2])
+        if (raw and raw < rr.rp[2]) or (not raw and mine and mine < need) then return "later", ("Needs %s with %s"):format(STANDING[need] or "more", name or "a faction") end
+    end
+    if rr.sp and IsPlayerSpell then
+        local known = safe(IsPlayerSpell, math.abs(rr.sp))
+        if rr.sp > 0 and known == false then return "later", "Needs a spell you haven't learned yet" end
+        if rr.sp < 0 and known == true then return "never", "Not for characters who know that spell" end
+    end
+    return nil
+end
+
 function F:Available(id)
     if lowLevelHidden(id) then
         return false, "Low level: Blizzard hides these (map Filter > Low-Level Quests shows them)"
@@ -171,6 +323,29 @@ function F:Available(id)
     local lvl = UnitLevel("player") or 0
     local b = VoidQuestCharDB and VoidQuestCharDB.blocked and VoidQuestCharDB.blocked[id]
     if b and lvl <= b then return false, "Not offered to you yet (level or an earlier quest first)" end
+    -- a known earlier quest you haven't turned in: no "!" yet, and say which one
+    -- what NorgannonDB says the quest needs (F:Rule); only quests it has nothing on fall back to
+    -- the earlier quest of a known chain link
+    local kind, why, first = self:Rule(id)
+    if kind then return false, why, first end
+    local prev = not (VQ.ForeverRules and VQ.ForeverRules[id]) and VQ.Chains and VQ.Chains.Earlier and VQ.Chains:Earlier(id)
+    if prev then
+        -- back to the first step still to do (1147 -> 1146 -> 1145: Korran, not Belgrom)
+        for _ = 1, 10 do
+            local p = VQ.Chains:Earlier(prev)
+            if not p or p == id then break end
+            prev = p
+        end
+        local t = (C_QuestLog.GetTitleForQuestID and safe(C_QuestLog.GetTitleForQuestID, prev)) or (VQ.ForeverQuests and VQ.ForeverQuests[prev] and VQ.ForeverQuests[prev][1])
+        local s = VQ.Starts and VQ.Starts:Get(prev)
+        local zone = s and s.m and C_Map.GetMapInfo(s.m)
+        local where = {}
+        local giver = VQ.Starts and VQ.Starts.Giver and VQ.Starts:Giver(prev)
+        if giver then where[#where + 1] = "from " .. giver end
+        if zone and zone.name then where[#where + 1] = "in " .. zone.name end
+        return false, ("Needs %s %sfirst"):format(t and ("\"" .. t .. "\"") or "an earlier quest",
+            #where > 0 and (table.concat(where, " ") .. " ") or ""), prev   -- 3rd: the grey pin's first step (Codex 11-11)
+    end
     local ql = self:Level(id)
     if ql > 0 and ql >= lvl + RED then return false, ("Level %d: too high for you yet"):format(ql) end
     return true, ""
@@ -571,15 +746,36 @@ function VoidQuestForeverPinMixin:OnLoad()
     self:UseFrameLevelType("PIN_FRAME_LEVEL_QUEST_OFFER")
 end
 
-function VoidQuestForeverPinMixin:OnAcquired(id, x, y)
-    self.id = id
+-- first: set when an earlier quest has to be done first (a grey "!"; the click routes to it)
+function VoidQuestForeverPinMixin:OnAcquired(id, x, y, first)
+    self.id, self.first = id, first
     self:SetPosition(x, y)
+    if self.icon then
+        self.icon:SetDesaturated(first ~= nil)
+        if first then self.icon:SetVertexColor(0.75, 0.75, 0.85, 0.85) else self.icon:SetVertexColor(1, 1, 1, 1) end
+    end
+    self:SetSize(first and 15 or 18, first and 15 or 18)
     self:Show()
 end
 
-function VoidQuestForeverPinMixin:OnMouseEnter() if self.id then Tooltip(self, self.id) end end
+function VoidQuestForeverPinMixin:OnMouseEnter()
+    if not self.id then return end
+    if self.first then
+        local _, why = F:Available(self.id)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local t = F:Info(self.id)
+        GameTooltip:AddLine((t and t.title or "Quest") .. ": not yet", 0.75, 0.75, 0.85)
+        GameTooltip:AddLine(((why or ""):gsub("^Needs ", "Go get ")), 1, 0.82, 0, true)
+        GameTooltip:AddLine("Click: the way to it", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+        return
+    end
+    Tooltip(self, self.id)
+end
 function VoidQuestForeverPinMixin:OnMouseLeave() GameTooltip:Hide() end
-function VoidQuestForeverPinMixin:OnClick(button) if button == "LeftButton" and self.id then F:Go(self.id) end end
+function VoidQuestForeverPinMixin:OnClick(button)
+    if button == "LeftButton" and self.id then F:Go(self.first or self.id) end
+end
 
 VoidQuestForeverProviderMixin = CreateFromMixins(MapCanvasDataProviderMixin)
 
@@ -602,10 +798,16 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
     local waiting = false
     for id, r in pairs(VQ.ForeverQuests or {}) do
         local s = F:Spot(id)
-        local ok = s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:Available(id)
-           and F:InScope(id)   -- Min / Mid / Max
+        local here = s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:InScope(id)   -- Min / Mid / Max
+        local avail, first
+        if here then avail, _, first = F:Available(id) end
+        local ok = here and avail
         if ok and not F:LevelSettled(id) then ok = false; waiting = true end   -- no "!" before its level is in
-        if ok then
+        -- held back only by an earlier quest somewhere else: a grey "!" that says go get it
+        -- (the user, 2026-11-11: "a different icon for quests ... not available bec the start
+        -- quest is somewhere else and to say go get it")
+        local later = here and not avail and first and first ~= id and VQ:Get("foreverPinsLater") ~= false
+        if ok or later then
             local x, y = s.x, s.y
             if s.m ~= mapID then
                 local cont, wp = safe(C_Map.GetWorldPosFromMapPos, s.m, CreateVector2D(x, y))
@@ -613,7 +815,7 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
                 if cont and wp then p = select(2, safe(C_Map.GetMapPosFromWorldPos, cont, wp, mapID)) end
                 if p then x, y = p:GetXY() else x = nil end
             end
-            if x then map:AcquirePin(PIN_TEMPLATE, id, x, y) end
+            if x then map:AcquirePin(PIN_TEMPLATE, id, x, y, (not ok) and first or nil) end
         end
     end
     -- levels still loading: draw again once LEVEL_WAIT is up (answers also redraw as they come in)

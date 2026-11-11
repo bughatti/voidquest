@@ -59,7 +59,8 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **Every quest in a zone** — a zone list with level, XP and rewards for all of Forever's quests (from Blizzard's own quest data), marked done, in your log, or still to do. Important ones have a yellow star.
 - **Density** — Min (important quests only: dungeon, elite and class quests, blue rewards, and chains that lead to them), Mid (plus every quest on a known chain) or Max (every quest, the default). It decides what the guide suggests next and which "!" the map shows; quests in your log always show.
 - **"!" on your map for quests you can take** — Forever's map shows none, so VoidQuest brings its own: thousands of quest givers ship with it, and it learns more as you play (where you picked a quest up, and every quest an NPC offers you, even ones you don't take).
-- **Too-high quests stay off the map** — quests five or more levels above you, and quests a giver didn't offer you yet (level or an earlier quest first). They come back as you level.
+- **Only quests you can take get a "!"** — VoidQuest checks what each quest needs before its giver offers it: your level, class and race, an earlier quest, a profession skill or a reputation. Quests for another class or race, quests closed off by one you did, and lead-ins whose quest you already have don't show at all; the rest come back when you can take them. Hover a quest in the zone list for why it's not yet.
+- **A grey "!" says go get it first** — a quest whose giver is here but needs an earlier quest somewhere else gets a grey "!": "Go get *The Swarm Grows* from Korran in The Barrens first". Click it for the way there.
 - **Shared with other VoidQuest players of your faction** — when you find a quest giver, a few other VoidQuest players online learn it, and you learn theirs. A spot is only used once two players agree on it. Horde and Alliance share separately (whispers don't cross factions, and the other side's quests are no use to you). See Privacy below.
 - **Ships with quest givers, turn-ins and chains** — from NorgannonDB, plus the spots VoidQuest players have confirmed. Where players' finds differ, they win.
 - **Players online box** — how many other VoidQuest players are online (shared with VoidGather and VoidSweep).
@@ -140,4 +141,4 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 
 ---
 
-*Part of the Void addon family by Vede · GPL-3.0 licensed · [Source & bug reports](https://github.com/bughatti/voidquest) · [All Void addons](https://www.curseforge.com/members/bughatti/projects) · free M+ & raid player lookups at [voidscout.io](https://voidscout.io) · more at [tinkerline.io](https://tinkerline.io) · [Discord](https://discord.gg/7ZHmx7zMDh)*
+*Part of the Void addon family by Vede · GPL-3.0 licensed · [Source & bug reports](https://github.com/bughatti/voidquest) · [All Void addons](https://www.curseforge.com/members/bughatti/projects) · free M+ & raid player lookups at [voidscout.io](https://voidscout.io) · more at [tinkerline.io](https://tinkerline.io/addons/voidquest/) · [Discord](https://discord.gg/7ZHmx7zMDh)*
