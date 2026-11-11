@@ -2720,7 +2720,7 @@ function mod:EnsurePanel()
     local function shareShown()
         local on = IsInGroup and IsInGroup() or false
         f.shareBtn:SetShown(on)
-        f.camp:SetWidth(PW() - (on and 250 or 200) - (f.bookBtn and 49 or 0))   -- Book button (Forever)
+        mod:FitHeader(f)
     end
     local gev = CreateFrame("Frame")
     gev:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -4115,6 +4115,36 @@ function mod:SetStepMode(f, popH)
     PanelHeight(f, 90 + popH)
 end
 
+-- The header buttons (Share, Book, Zone, Lines, density) sit right of the title, anchored from
+-- the right edge. On WoW Forever in a group that row is ~285 wide, wider than a narrow panel
+-- (the user's is 273), and Share hung out past the left border (2026-11-10). Fit them: shrink
+-- the text buttons evenly when the row doesn't fit (never below their text), and give the
+-- title what's left; no room at all = the title hides instead of drawing under the buttons.
+local HEADER_RIGHT = 46   -- tracker checkbox + gear, from the right edge to the first text button
+function mod:FitHeader(f)
+    f = f or self.frame   -- the build passes its panel: self.frame isn't set yet then
+    if not (f and f.densityBtn) then return end
+    local btns, sum = {}, 0   -- { button, natural width }, right to left
+    for _, e in ipairs({ { "densityBtn", 42 }, { "pickBtn", 42 }, { "zoneBtn", 46 }, { "bookBtn", 46 }, { "shareBtn", 46 } }) do
+        local b = f[e[1]]
+        if b and b:IsShown() then btns[#btns + 1] = { b, e[2] }; sum = sum + e[2] end
+    end
+    local gaps = 3 * #btns
+    local avail = PW() - HEADER_RIGHT - 8 - gaps   -- 8: the panel's left padding
+    local scale = (sum > 0 and avail < sum) and avail / sum or 1
+    local used = gaps
+    for _, e in ipairs(btns) do
+        local fs = e[1]:GetFontString()
+        local text = fs and fs:GetStringWidth() or 0
+        local w = math.max(math.floor(e[2] * scale), math.ceil(text) + 6)
+        e[1]:SetWidth(w)
+        used = used + w
+    end
+    local room = PW() - 12 - HEADER_RIGHT - used - 4
+    f.camp:SetWidth(math.max(1, room))
+    f.camp:SetAlpha(room >= 24 and 1 or 0)
+end
+
 -- Width changed (corner grip, or a setting): every line follows. Rows made earlier kept
 -- the width they were created with, so set them all again. Cheap; skipped while resizing
 -- by hand and in combat (the panel is protected then).
@@ -4123,7 +4153,7 @@ function mod:ApplyWidth()
     if not f or f._sizing or (InCombatLockdown() and f:IsProtected()) then return end
     local pw, cw = PW(), CW()
     if math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
-    f.camp:SetWidth(pw - ((f.shareBtn and f.shareBtn:IsShown()) and 250 or 200) - (f.bookBtn and 49 or 0))   -- room for Share in a group, Book on Forever
+    self:FitHeader()
     for _, fs in ipairs({ f.chapter, f.step, f.obj, f.side, f.meta, f.big }) do if fs then fs:SetWidth(cw) end end
     for _, row in ipairs(f.qRows or {}) do row:SetWidth(cw) end
     for _, row in ipairs(f.questRows or {}) do

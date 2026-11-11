@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.23
+
+- **The panel's buttons stay inside it.** In a group, the Share button could hang out past the left edge of a narrow quest panel. The buttons now shrink to fit the panel's width. Tested on WoW Forever (retail not re-tested).
+
 ## 0.3.22
 
 ### WoW Forever
