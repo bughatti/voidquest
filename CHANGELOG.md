@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.3.22
+
+### WoW Forever
+- **No more "!" that appear and vanish.** On a fresh install (or a zone VoidQuest hasn't seen) every quest's level was still loading, so every quest got a "!" on the map until the levels came in and the too-high ones dropped off a few seconds later. A "!" now waits until its quest's level is known (or 8 seconds, if the game never answers).
+- **Hunters and druids:** pointing at a tracked mob's dot reads it once, at the average of where your cursor was, instead of once per wiggle.
+
 ## 0.3.21
 
 ### WoW Forever: quest-mob spots, closer

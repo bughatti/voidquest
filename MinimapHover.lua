@@ -60,20 +60,44 @@ function H.Where()
 end
 
 -- Poll 5x a second while the cursor is over the minimap and a tooltip is up.
-local lastKey, lastAt, acc = nil, 0, 0
+--
+-- ONE reading per hover (2026-11-10, seen on a second client): the cursor drifts on a dot while
+-- its tooltip stays up, and every drift was a new estimate up to ~20 yd off, so a wiggle made 3-4
+-- spots. Now, while the same names stay up (and the readings stay within HOVER_SPREAD yards of
+-- their average), the readings are collected; when the tooltip goes or changes, the dot is
+-- reported once, at the AVERAGE of them: one spot, and a better one than any single reading. A
+-- second dot with the same name is a new hover: the tooltip goes away between them, or it's far.
+local HOVER_SPREAD = 60
+local cur   -- { key, names, map, sx, sy, n, w, h }
+local function flush()
+    local c = cur
+    cur = nil
+    if not c or c.n == 0 then return end
+    local x, y = c.sx / c.n, c.sy / c.n
+    local yards
+    local pos = C_Map.GetBestMapForUnit("player") == c.map and C_Map.GetPlayerMapPosition(c.map, "player")
+    if pos then
+        local px, py = pos:GetXY()
+        if px and py then yards = math.sqrt(((x - px) * c.w) ^ 2 + ((y - py) * c.h) ^ 2) end
+    end
+    for _, fn in ipairs(H.listeners) do pcall(fn, c.names, c.map, x, y, yards) end
+end
+H.Flush = flush
+
+local acc = 0
 local poll = CreateFrame("Frame")
 poll:SetScript("OnUpdate", function(_, dt)
     acc = acc + dt
     if acc < 0.2 then return end
     acc = 0
     if #H.listeners == 0 or not (Minimap and Minimap:IsVisible() and Minimap:IsMouseOver()) or not GameTooltip:IsShown() then
-        lastKey = nil
+        flush()   -- the hover ended: report it
         return
     end
     -- the game's own dots show as UIParent's tooltip; an addon's pin (VoidGather, VoidSweep...)
     -- owns its tooltip and is skipped (its spot is known already)
     local owner = GameTooltip:GetOwner()
-    if owner ~= UIParent and owner ~= Minimap then return end
+    if owner ~= UIParent and owner ~= Minimap then flush() return end
     local names = {}
     for i = 1, math.min(GameTooltip:NumLines() or 0, 12) do
         local fs = _G["GameTooltipTextLeft" .. i]
@@ -85,13 +109,18 @@ poll:SetScript("OnUpdate", function(_, dt)
             end
         end
     end
-    if #names == 0 then return end
-    local map, x, y, yards = H.Where()
+    if #names == 0 then flush() return end
+    local map, x, y = H.Where()
     if not map then return end
-    -- the same dot again (name + where, ~15 yd), not just the same name: two Peacebloom dots
-    -- hovered one after the other are two nodes (Sol review)
-    local key = table.concat(names, "|") .. "@" .. map .. ":" .. math.floor(x * 500) .. ":" .. math.floor(y * 500)
-    if key == lastKey and GetTime() - lastAt < 5 then return end
-    lastKey, lastAt = key, GetTime()
-    for _, fn in ipairs(H.listeners) do pcall(fn, names, map, x, y, yards) end
+    local key = table.concat(names, "|")
+    if cur and (cur.key ~= key or cur.map ~= map
+        or math.sqrt(((x - cur.sx / cur.n) * cur.w) ^ 2 + ((y - cur.sy / cur.n) * cur.h) ^ 2) > HOVER_SPREAD) then
+        flush()   -- another dot (other names, or far from this one): report the one before
+    end
+    if not cur then
+        local ok, w, h = pcall(C_Map.GetMapWorldSize, map)
+        if not (ok and w and h and w > 0 and h > 0) then return end
+        cur = { key = key, names = names, map = map, sx = 0, sy = 0, n = 0, w = w, h = h }
+    end
+    cur.sx, cur.sy, cur.n = cur.sx + x, cur.sy + y, cur.n + 1
 end)

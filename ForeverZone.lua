@@ -114,10 +114,21 @@ function F:Level(id)
         return lv
     end
     if not asked[id] and C_QuestLog.RequestLoadQuestByID then
-        asked[id] = true
+        asked[id] = GetTime()
         safe(C_QuestLog.RequestLoadQuestByID, id)
     end
     return 0
+end
+
+-- Is the level in, so the "too high" check is real? A map "!" waits for it (the user, 2026-11-10:
+-- on a fresh install "a lot of quests that went away after a few sec": every level was still
+-- unknown, so every quest showed until the levels came in and the too-high ones dropped). A quest
+-- the server never answers for shows after LEVEL_WAIT anyway, rather than never.
+local LEVEL_WAIT = 8
+function F:LevelSettled(id)
+    if self:Level(id) > 0 then return true end
+    local t = asked[id]
+    return type(t) == "number" and GetTime() - t > LEVEL_WAIT
 end
 
 -- The level if it's known already (cache, saved, or the client has it), WITHOUT asking the server:
@@ -588,10 +599,13 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
         local mi = safe(C_Map.GetMapInfo, m)
         return mi and mi.parentMapID == mapID and mi.mapType ~= ZONE_MAP and true or false
     end
+    local waiting = false
     for id, r in pairs(VQ.ForeverQuests or {}) do
         local s = F:Spot(id)
-        if s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:Available(id)
-           and F:InScope(id) then   -- Min / Mid / Max
+        local ok = s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:Available(id)
+           and F:InScope(id)   -- Min / Mid / Max
+        if ok and not F:LevelSettled(id) then ok = false; waiting = true end   -- no "!" before its level is in
+        if ok then
             local x, y = s.x, s.y
             if s.m ~= mapID then
                 local cont, wp = safe(C_Map.GetWorldPosFromMapPos, s.m, CreateVector2D(x, y))
@@ -601,6 +615,11 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
             end
             if x then map:AcquirePin(PIN_TEMPLATE, id, x, y) end
         end
+    end
+    -- levels still loading: draw again once LEVEL_WAIT is up (answers also redraw as they come in)
+    if waiting and not self.levelTimer then
+        self.levelTimer = true
+        C_Timer.After(LEVEL_WAIT + 1, function() self.levelTimer = nil; F:Refresh() end)
     end
 end
 
