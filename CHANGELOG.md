@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.24
+
+- **Share one quest at a time.** The Share button is gone (it offered your whole log to everyone in the group). In a group, a small green **S** now sits at the end of each quest line that someone in your group doesn't have: click it to share just that quest, hover it to see who's missing it.
+- **The panel's buttons moved to the bottom.** Book, Zone, Lines, the quest-density button, settings and the Blizzard-tracker box sit in a row along the bottom edge, so the title at the top always has room.
+- **Resizing is live.** Drag the corner and the quest lines, buttons and group counts follow as you drag; a taller panel shows more quests right away.
+
+Tested on WoW Forever (retail not re-tested).
+
 ## 0.3.23
 
 - **The panel's buttons stay inside it.** In a group, the Share button could hang out past the left edge of a narrow quest panel. The buttons now shrink to fit the panel's width. Tested on WoW Forever (retail not re-tested).

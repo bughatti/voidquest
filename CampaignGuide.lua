@@ -21,9 +21,15 @@ local function safe(fn, ...) if not fn then return nil end local ok, a, b, c = p
 -- The guide panel holds a secure quest-item button, which makes the panel itself
 -- protected in combat: SetHeight there is ADDON_ACTION_BLOCKED (BugGrabber, 2026-10-25).
 -- Skip it then; the PLAYER_REGEN_ENABLED refresh sets the right height.
+-- The buttons (Book, Zone, Lines, density, gear, tracker box) sit in a row along the panel's
+-- BOTTOM (the user, 2026-11-10: "put buttons at bottom and let them move when the box is
+-- readjusted"), pinned to the bottom edge. Every height below is the content's; PanelHeight
+-- adds this footer, and PanelBudget (the saved height) takes it off.
+local FOOTER = 24
 local function PanelHeight(f, h)
     if InCombatLockdown() and f:IsProtected() then return end
-    f:SetHeight(h)
+    if f._sizing then return end   -- the player is dragging the corner: their height wins
+    f:SetHeight(h + FOOTER)
 end
 -- Panel width (drag the corner grip; setting panelWidth) and the content width inside it.
 -- Every row reads CW(), and texts cut to fit scale with it (truncTo).
@@ -2544,6 +2550,24 @@ function mod:EnsurePanel()
         f._sizing = true
         f:StartSizing("BOTTOMRIGHT")
     end)
+    -- Live while dragging (the user, 2026-11-10: "make sure it can grow and shrink depending on
+    -- how i shape it"): the lines, buttons and title follow the edge, and a taller / shorter
+    -- panel shows more / fewer quest lines as you drag. At most 10 redraws a second; the
+    -- height is the drag's (PanelHeight skips while sizing); saved and rounded on let go.
+    f:SetScript("OnSizeChanged", function(self)
+        if not self._sizing or self._livePending then return end
+        self._livePending = true
+        C_Timer.After(0.1, function()
+            self._livePending = nil
+            if not self._sizing or (InCombatLockdown() and self:IsProtected()) then return end
+            VoidQuestDB.panelWidth = self:GetWidth()
+            VoidQuestDB.panelHeight = self:GetHeight()
+            self._live = true
+            local ok, err = pcall(mod.Refresh, mod)
+            self._live = nil
+            if not ok then geterrorhandler()(err) end
+        end)
+    end)
     -- Let go: stop, save, redraw. If a fight started mid-drag the panel is protected and
     -- can't be stopped now -- finish as soon as combat ends.
     local function finishSizing()
@@ -2600,7 +2624,7 @@ function mod:EnsurePanel()
 
     -- Blizzard-tracker show/hide checkbox (far right) + gear + density + quest-line picker
     f.trackerCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-    f.trackerCheck:SetSize(22, 22); f.trackerCheck:SetPoint("TOPRIGHT", -2, -4)
+    f.trackerCheck:SetSize(22, 22); f.trackerCheck:SetPoint("BOTTOMRIGHT", -18, 1)   -- bottom row, left of the resize grip
     f.trackerCheck:SetChecked(VQ:Get("blizzTracker") ~= false)
     f.trackerCheck:SetScript("OnClick", function(s)
         if blizzTrackerNeeded() then
@@ -2704,29 +2728,9 @@ function mod:EnsurePanel()
         f.bookBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
-    -- in a group: Share = offer every quest someone in the group doesn't have (alt-click a
-    -- quest line for just that one). The title gives up the room while it shows.
-    f.shareBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.shareBtn:SetSize(46, 18); f.shareBtn:SetPoint("TOPRIGHT", f.bookBtn or f.zoneBtn, "TOPLEFT", -3, 0)
-    f.shareBtn:SetText("Share")
-    f.shareBtn:SetScript("OnClick", function() mod:ShareMissing() end)
-    f.shareBtn:SetScript("OnEnter", function(s)
-        GameTooltip:SetOwner(s, "ANCHOR_LEFT")
-        GameTooltip:AddLine("Share quests")
-        GameTooltip:AddLine("Offers your group every quest you have that someone in it doesn't. Alt-click a quest line to share just that one.", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    f.shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    local function shareShown()
-        local on = IsInGroup and IsInGroup() or false
-        f.shareBtn:SetShown(on)
-        mod:FitHeader(f)
-    end
-    local gev = CreateFrame("Frame")
-    gev:RegisterEvent("GROUP_ROSTER_UPDATE")
-    gev:RegisterEvent("PLAYER_ENTERING_WORLD")
-    gev:SetScript("OnEvent", shareShown)
-    shareShown()
+    -- (2026-11-10: no Share button any more; each quest line has a small "S" in a group, see
+    -- SetLineParty. A one-click "share everything" pushed a whole log on 4 people.)
+    mod:FitHeader(f)
 
     -- click the STEP or OBJECTIVE line to (re)pin its waypoint -- "take me there"
     local function pinClick()
@@ -3451,61 +3455,99 @@ local function ShareQuest(qid, quiet)
 end
 mod.ShareQuest = ShareQuest
 
-function mod:ShareMissing()
-    if not (IsInGroup and IsInGroup()) then VQ:Print("Join a group first to share quests."); return end
-    local others = math.max(0, (GetNumGroupMembers() or 1) - 1)
-    local queue = {}
-    for i = 1, (C_QuestLog.GetNumQuestLogEntries() or 0) do
-        local info = safe(C_QuestLog.GetInfo, i)
-        if info and not info.isHeader and not info.isHidden and info.questID and Shareable(info.questID) then
-            local have = GroupOnQuest(info.questID)
-            if have < others then queue[#queue + 1] = info.questID end
+-- Who in your group is NOT on this quest (names, for the "S" share button's tooltip).
+local function GroupMissing(qid)
+    local names = {}
+    local raid = IsInRaid and IsInRaid()
+    for i = 1, raid and 40 or 4 do
+        local unit = (raid and "raid" or "party") .. i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+            local ok, on = pcall(C_QuestLog.IsUnitOnQuest, unit, qid)
+            if not (ok and not (issecretvalue and issecretvalue(on)) and on == true) then
+                local n = UnitName(unit)
+                names[#names + 1] = (n and not (issecretvalue and issecretvalue(n))) and n or "?"
+            end
         end
     end
-    if #queue == 0 then VQ:Print("Your group already has all your shareable quests."); return end
-    if InCombatLockdown() then VQ:Print("You can share quests after the fight."); return end
-    mod._shareStopped = nil
-    VQ:Print(("Sharing %d quest%s with your group."):format(#queue, #queue == 1 and "" or "s"))
-    for i, qid in ipairs(queue) do
-        C_Timer.After((i - 1) * 0.6, function()
-            -- a fight started mid-way: stop (say so once); press Share again afterwards
-            if InCombatLockdown() then
-                if not mod._shareStopped then mod._shareStopped = true; VQ:Print("Sharing stopped for the fight: press Share again after it.") end
-                return
-            end
-            ShareQuest(qid, true)
-        end)
+    return names
+end
+
+-- Share one quest: a small "S" at the right end of its line (the user, 2026-11-10: "take the
+-- share button off and put a small s on the right side of the quests for each one that i just
+-- click to share that quest"; the old header button shared the whole log with everyone).
+-- Shown in a group when the quest can be shared and someone in the group doesn't have it.
+local function ShareTip(s)
+    GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Share with your group")
+    local t = s.qid and safe(C_QuestLog.GetTitleForQuestID, s.qid)
+    if t then GameTooltip:AddLine(t, 1, 1, 1) end
+    if s.missing and #s.missing > 0 then
+        GameTooltip:AddLine("Doesn't have it: " .. table.concat(s.missing, ", "), 0.8, 0.8, 0.8, true)
     end
+    GameTooltip:Show()
+end
+local function ShareS(holder)
+    local b = holder.shareS
+    if b then return b end
+    b = CreateFrame("Button", nil, holder)
+    b:SetSize(11, 11)
+    b:SetFrameLevel(holder:GetFrameLevel() + 2)   -- over the line, so the click is the S's
+    local bg = b:CreateTexture(nil, "ARTWORK")
+    bg:SetAllPoints(); bg:SetColorTexture(0.1, 0.5, 0.2, 1)
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.25)
+    b.text = b:CreateFontString(nil, "OVERLAY"); VQ:SetFont(b.text, 9, "")
+    b.text:SetPoint("CENTER", 0, 0); b.text:SetTextColor(1, 1, 1); b.text:SetText("S")
+    b:SetScript("OnClick", function(s) if s.qid then ShareQuest(s.qid) end end)
+    b:SetScript("OnEnter", ShareTip)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    holder.shareS = b
+    return b
 end
 
 -- Put a group count at the right of a line's text (fs = the line's text, holder = the
 -- frame it sits in): a white number on a solid blue badge, so it reads over any ground
 -- behind a see-through panel (plain coloured digits got lost, 2026-11-06). The text stops
--- short of the badge so they never overlap.
-local function SetLineParty(holder, fs, n)
+-- short of the badge so they never overlap. shareQid: the line's quest, for its "S" (right
+-- of the badge, at the end of the line).
+local function SetLineParty(holder, fs, n, shareQid)
     if not holder.partyBg then
         local bg = holder:CreateTexture(nil, "ARTWORK")
         bg:SetColorTexture(0.05, 0.32, 0.85, 1)
-        bg:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
         bg:SetHeight(11)
         holder.partyBg = bg
         holder.party = holder:CreateFontString(nil, "OVERLAY"); VQ:SetFont(holder.party, 9, "")
         holder.party:SetPoint("CENTER", bg, "CENTER", 0, 0)
         holder.party:SetTextColor(1, 1, 1)
     end
+    local missing = shareQid and IsInGroup and IsInGroup() and C_QuestLog.IsUnitOnQuest and Shareable(shareQid)
+        and GroupMissing(shareQid)
+    local edge, gap = holder, 0   -- what the next thing to the left lines up against
+    if missing and #missing > 0 then
+        local s = ShareS(holder)
+        s.qid, s.missing = shareQid, missing
+        s:ClearAllPoints(); s:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+        s:Show()
+        edge, gap = s, -3
+    elseif holder.shareS then
+        holder.shareS:Hide(); holder.shareS.qid = nil
+    end
+    local bg = holder.partyBg
+    bg:ClearAllPoints()
+    bg:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", gap, 0)
     fs:ClearAllPoints()
     fs:SetPoint("TOPLEFT", holder, "TOPLEFT"); fs:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT")
     if n and n > 0 then
         holder.party:SetText(tostring(n))
-        holder.partyBg:SetWidth(math.max(11, (holder.party:GetStringWidth() or 6) + 6))
-        holder.partyBg:Show(); holder.party:Show()
-        fs:SetPoint("RIGHT", holder.partyBg, "LEFT", -4, 0)
+        bg:SetWidth(math.max(11, (holder.party:GetStringWidth() or 6) + 6))
+        bg:Show(); holder.party:Show()
+        fs:SetPoint("RIGHT", bg, "LEFT", -4, 0)
     else
-        holder.party:SetText(""); holder.party:Hide(); holder.partyBg:Hide()
-        fs:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+        holder.party:SetText(""); holder.party:Hide(); bg:Hide()
+        fs:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", edge == holder and 0 or -4, 0)
     end
 end
-local function SetRowParty(row, n) SetLineParty(row, row.text, n) end
+local function SetRowParty(row, n, qid) SetLineParty(row, row.text, n, qid) end
 
 -- The way to a quest's next stop in another zone, through VoidGPS (the user, 2026-11-09: "i have
 -- a quest to turn in near grom gol, yet i dont know how to get there, im in camp t so somewhere it
@@ -3669,16 +3711,17 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             local nGroup, groupNames = GroupOnQuest(qid)
             row.tip = QuestTipWithGroup(qid, e.zone, groupNames)
             row.partyN = nGroup
+            row.shareQid = qid
             row:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
                 if IsShiftKeyDown() and mod:GuideToQuest(qid) then   -- shift: VoidGPS guides you to its next stop
                 elseif IsAltKeyDown() then ShareQuest(qid)
                 elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
             end)
         end
-        SetRowParty(row, row.partyN or 0)   -- 0 for events, coffers and group titles
-        row.partyN = nil
+        SetRowParty(row, row.partyN or 0, row.shareQid)   -- 0 / no S for events, coffers and group titles
+        row.partyN, row.shareQid = nil, nil
         row.text:SetText(text)
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (i - 1) * QROW)
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (i - 1) * QROW); row:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         row:Show()
         used = used + 1
     end
@@ -3693,7 +3736,7 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             nHidden, nHidden == 1 and "" or "s"))
         row.tip = MoreTip(hidden)
         row:SetScript("OnClick", function() mod:ToggleQuestLog() end)
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (used - 1) * QROW)
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6 - (used - 1) * QROW); row:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         row:Show()
     end
     for i = used + 1, #(f.qRows or {}) do f.qRows[i]:Hide() end
@@ -3706,7 +3749,7 @@ end
 
 -- Fixed panel height (Settings > Guide panel > Height). The guide grows past it only if
 -- its own lines don't fit; quest lines only fill what's left.
-local function PanelBudget() return VQ:Get("panelHeight") or 230 end
+local function PanelBudget() return (VQ:Get("panelHeight") or 230) - FOOTER end   -- room for content (the footer row is under it)
 
 -- How tall the guide's own part is: from the panel's top to the bottom of `below` (the
 -- region the quest lines hang from), plus room at the bottom for the resize grip. Both
@@ -3847,7 +3890,7 @@ function mod:RenderQuestList(f, popH)
     local scen = self:ScenarioEntry()
     local recipes = self:TrackedRecipes()
     local tracked = safe(C_SuperTrack.GetSuperTrackedQuestID)
-    f.camp:SetText(("|cff00c7ffMy Quests|r |cff888888(%d)|r"):format(#quests + (scen and 1 or 0) + #recipes))
+    f.camp:SetText(("|cff00c7ffMy Quests|r |cff888888(%d)|r"):format(#quests + (scen and 1 or 0) + #recipes)); mod:FitHeader(f)   -- the title comes first
     local ROWH, top = 26, -28 - popH
     -- fixed height (panelHeight): in-area events / WQs / bonus objectives and this zone's
     -- quests; other zones' quests (tagged with their zone) only when this zone has none;
@@ -3910,7 +3953,7 @@ function mod:RenderQuestList(f, popH)
             row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(CW() - 4)
             f.questRows[1] = row
         end
-        row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top)
+        row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top); row.btn:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - 13)
         SetLineParty(row.btn, row.title, 0)
         row.title:SetText("|cffffd200" .. truncTo(scen.name, 36) .. "|r |cff88ccff[event]|r")
@@ -3932,7 +3975,7 @@ function mod:RenderQuestList(f, popH)
             row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(CW() - 4)
             f.questRows[ri] = row
         end
-        row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH)
+        row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH); row.btn:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - (ri - 1) * ROWH - 13)
         local complete = safe(C_QuestLog.IsComplete, qid)
         local title = (taskTitles and taskTitles[qid])           -- GetTaskInfo display name first
@@ -3971,7 +4014,7 @@ function mod:RenderQuestList(f, popH)
             elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
         end)
         local nGroup, groupNames = GroupOnQuest(qid)
-        SetLineParty(row.btn, row.title, nGroup)
+        SetLineParty(row.btn, row.title, nGroup, qid)
         row.btn:SetScript("OnEnter", QuestTipWithGroup(qid, zoneTag[qid], groupNames))
         row.btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.btn:Show(); row.obj:Show()
@@ -3990,7 +4033,7 @@ function mod:RenderQuestList(f, popH)
             row.obj:SetTextColor(.65, .65, .65); row.obj:SetJustifyH("LEFT"); row.obj:SetWidth(CW() - 4)
             f.questRows[ri] = row
         end
-        row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH)
+        row.btn:ClearAllPoints(); row.btn:SetPoint("TOPLEFT", 12, top - (ri - 1) * ROWH); row.btn:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         row.obj:ClearAllPoints(); row.obj:SetPoint("TOPLEFT", 18, top - (ri - 1) * ROWH - 13)
         SetLineParty(row.btn, row.title, 0)   -- a reused quest row: no leftover group badge
         row.title:SetText("|cffffffff" .. truncTo(rec.name, 34) .. "|r |cff88ccff[recipe]|r")
@@ -4012,7 +4055,7 @@ function mod:RenderQuestList(f, popH)
             #overflow, #overflow == 1 and "" or "s"))
         row.tip = MoreTip(overflow)
         row:SetScript("OnClick", function() mod:ToggleQuestLog() end)
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", f, "TOPLEFT", 12, top - used * ROWH)
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", f, "TOPLEFT", 12, top - used * ROWH); row:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         row:Show()
         used = used + 1
     end
@@ -4045,7 +4088,7 @@ function mod:RenderPopups(f)
             row:SetSize(CW(), 17)
             f.popupRows[i] = row
         end
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 12, -27 - (i - 1) * ROW)
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 12, -27 - (i - 1) * ROW); row:SetPoint("RIGHT", f, "RIGHT", -4, 0)   -- follows the right edge live while resizing
         local isComplete = (pu.kind == "COMPLETE")
         row:SetText((isComplete and "|cff55ff55Turn in:|r " or "|cffffd200New quest:|r ") .. truncTo(pu.title, 30))
         local qid, complete = pu.qid, isComplete
@@ -4115,34 +4158,50 @@ function mod:SetStepMode(f, popH)
     PanelHeight(f, 90 + popH)
 end
 
--- The header buttons (Share, Book, Zone, Lines, density) sit right of the title, anchored from
--- the right edge. On WoW Forever in a group that row is ~285 wide, wider than a narrow panel
--- (the user's is 273), and Share hung out past the left border (2026-11-10). Fit them: shrink
--- the text buttons evenly when the row doesn't fit (never below their text), and give the
--- title what's left; no room at all = the title hides instead of drawing under the buttons.
-local HEADER_RIGHT = 46   -- tracker checkbox + gear, from the right edge to the first text button
+-- The button row along the bottom (Book, Zone, Lines, density, then the gear and the tracker box
+-- at the right, left of the resize grip). The title has the whole top line to itself. The text
+-- buttons keep their size while they fit; on a narrow panel they shrink, never below their text,
+-- and switch to the small font when even that doesn't fit. Runs on resize and title changes.
+local FOOTER_RIGHT = 62   -- grip + tracker box + gear, from the right edge to the first text button
+local FOOTER_BTNS = { { "densityBtn", 42 }, { "pickBtn", 42 }, { "zoneBtn", 46 }, { "bookBtn", 46 } }
 function mod:FitHeader(f)
     f = f or self.frame   -- the build passes its panel: self.frame isn't set yet then
     if not (f and f.densityBtn) then return end
+    f.camp:SetWidth(PW() - 24)
+    f.camp:SetAlpha(1)
     local btns, sum = {}, 0   -- { button, natural width }, right to left
-    for _, e in ipairs({ { "densityBtn", 42 }, { "pickBtn", 42 }, { "zoneBtn", 46 }, { "bookBtn", 46 }, { "shareBtn", 46 } }) do
+    for _, e in ipairs(FOOTER_BTNS) do
         local b = f[e[1]]
         if b and b:IsShown() then btns[#btns + 1] = { b, e[2] }; sum = sum + e[2] end
     end
     local gaps = 3 * #btns
-    local avail = PW() - HEADER_RIGHT - 8 - gaps   -- 8: the panel's left padding
-    local scale = (sum > 0 and avail < sum) and avail / sum or 1
-    local used = gaps
-    for _, e in ipairs(btns) do
-        local fs = e[1]:GetFontString()
-        local text = fs and fs:GetStringWidth() or 0
-        local w = math.max(math.floor(e[2] * scale), math.ceil(text) + 6)
-        e[1]:SetWidth(w)
-        used = used + w
+    local avail = PW() - 8 - FOOTER_RIGHT - gaps   -- 8: the panel's left padding
+    local function measure(small)
+        local mins, minSum = {}, 0
+        for i, e in ipairs(btns) do
+            local b = e[1]
+            if b._vqSmall ~= small then
+                b:SetNormalFontObject(small and GameFontNormalSmall or GameFontNormal)
+                b:SetHighlightFontObject(small and GameFontHighlightSmall or GameFontHighlight)
+                b:SetDisabledFontObject(small and GameFontDisableSmall or GameFontDisable)
+                b._vqSmall = small
+            end
+            local fs = b:GetFontString()
+            mins[i] = math.ceil(fs and fs:GetStringWidth() or 20) + 8
+            minSum = minSum + mins[i]
+        end
+        return mins, minSum
     end
-    local room = PW() - 12 - HEADER_RIGHT - used - 4
-    f.camp:SetWidth(math.max(1, room))
-    f.camp:SetAlpha(room >= 24 and 1 or 0)
+    local mins, minSum = measure(false)
+    if minSum > avail then mins, minSum = measure(true) end
+    for i, e in ipairs(btns) do
+        local w = e[2]
+        if avail < sum then   -- squeeze: from natural toward the text-only width
+            local k = (sum > minSum) and math.max(0, (avail - minSum) / (sum - minSum)) or 0
+            w = mins[i] + (e[2] - mins[i]) * k
+        end
+        e[1]:SetWidth(math.floor(math.max(w, mins[i])))
+    end
 end
 
 -- Width changed (corner grip, or a setting): every line follows. Rows made earlier kept
@@ -4150,9 +4209,9 @@ end
 -- by hand and in combat (the panel is protected then).
 function mod:ApplyWidth()
     local f = self.frame
-    if not f or f._sizing or (InCombatLockdown() and f:IsProtected()) then return end
+    if not f or (f._sizing and not f._live) or (InCombatLockdown() and f:IsProtected()) then return end
     local pw, cw = PW(), CW()
-    if math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
+    if not f._sizing and math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
     self:FitHeader()
     for _, fs in ipairs({ f.chapter, f.step, f.obj, f.side, f.meta, f.big }) do if fs then fs:SetWidth(cw) end end
     for _, row in ipairs(f.qRows or {}) do row:SetWidth(cw) end
@@ -4175,7 +4234,8 @@ end
 
 function mod:Refresh()
     local f = self:EnsurePanel()
-    if MouseHeldOver(f) and (not self._clickHoldAt or GetTime() - self._clickHoldAt < 2) then
+    -- (not during a live resize redraw: dragging the grip IS holding the mouse over the panel)
+    if not f._live and MouseHeldOver(f) and (not self._clickHoldAt or GetTime() - self._clickHoldAt < 2) then
         if not self._clickHoldAt then
             self._clickHoldAt = GetTime()
             local function retry()
@@ -4191,7 +4251,7 @@ function mod:Refresh()
         return
     end
     self._stepQid = nil   -- set again below only when a guided step is shown
-    if f._sizing then return end   -- being resized by hand: redraw once it's let go
+    if f._sizing and not f._live then return end   -- being resized by hand: only the live redraw (OnSizeChanged)
     self:ApplyWidth()
     f.side:Hide(); f.sideBtn:Hide(); self._side = nil   -- re-shown below in step mode
     f.big:Hide(); f.bigBtn:Hide(); self._big = nil
@@ -4222,7 +4282,7 @@ function mod:Refresh()
         -- No campaign AND no quests at all. Show the box (with its buttons) so you can reach
         -- the campaign selector -- hiding it entirely left no way to pick one.
         self:SetStepMode(f, popH)
-        f.camp:SetText("|cff00c7ffVoidQuest|r")
+        f.camp:SetText("|cff00c7ffVoidQuest|r"); mod:FitHeader(f)   -- the title comes first
         f.chapter:SetText("No campaign or quests on this character")
         f.step:SetText("|cffffd200Click the gear (top-right) or 'Lines'|r")
         f.obj:SetText("|cff888888then Select campaign -- or pick up a quest.|r")
@@ -4247,7 +4307,7 @@ function mod:Refresh()
     end
     self:SetStepMode(f, popH)   -- campaign mode: single-step widgets
     local g = r.g
-    f.camp:SetText("|cff00c7ff" .. (g.campName or "Campaign") .. "|r")
+    f.camp:SetText("|cff00c7ff" .. (g.campName or "Campaign") .. "|r"); mod:FitHeader(f)   -- the title comes first
     f.chapter:SetText((self:ArrowOn() and "" or "|cffff5555[arrow off -- world map button]|r ") .. (g.chapter or ""))
     -- WoW Forever's zone guide: Zones | Dungeons tabs instead of the chapter line
     -- (an arrow-off warning keeps the chapter line, so it can't go unseen)
