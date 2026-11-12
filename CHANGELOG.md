@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.27 — 2026-11-12
+
+- **Fixed: a side of a box could be missing**, e.g. the right line of the recipes box and its buttons when the game window is an odd number of pixels wide. Every Void box now always shows all four border lines.
+
 ## 0.3.26 — 2026-11-12
 
 - **WoW Forever: when an item a quest needs comes from another quest, it says so.** Catch of the Day wants Bloodbelly Fish, and Jinar'Zillen only offers "Fish in a Bucket", which looks like a low-level side quest. The quest's hover (and VoidMap's quest page) now reads "Bloodbelly Fish: take 'Fish in a Bucket' from Jinar'Zillen, it gives them (it asks for Shellfish from a Shellfish Trap, or buy them)", and the route sends you to Jinar'Zillen for that step.
