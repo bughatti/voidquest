@@ -2525,13 +2525,17 @@ function mod:EnsurePanel()
     local f = CreateFrame("Frame", "VoidQuestGuidePanel", UIParent, "BackdropTemplate")
     f:SetSize(PW(), 90)
     local p = (VoidQuestDB and VoidQuestDB.guidePoint) or { "RIGHT", -24, 120 }
-    f:SetPoint(p[1], UIParent, p[1], p[2], p[3])
+    -- { point, x, y, relPoint }: relPoint added 11-12 (it was taken to be the point; when the game
+    -- anchored the dragged panel to another corner of the screen it came back elsewhere after a restart)
+    f:SetPoint(p[1], UIParent, p[4] or p[1], p[2], p[3])
+    f:SetClampedToScreen(true)
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(s) if not VQ:Get("lockPanel") then s:StartMoving() end end)
     f:SetScript("OnDragStop", function(s)
         s:StopMovingOrSizing()
-        local a, _, _, x, y = s:GetPoint()
-        VoidQuestDB.guidePoint = { a, x, y }
+        if s.SetUserPlaced then s:SetUserPlaced(false) end
+        local a, _, r, x, y = s:GetPoint()
+        VoidQuestDB.guidePoint = { a, x, y, r }
     end)
     VQ:CreateBackdrop(f, 0.9)
     -- Resize: drag the grip in the bottom-right corner (the player, 2026-11-05: "drag the
@@ -2582,8 +2586,8 @@ function mod:EnsurePanel()
         VoidQuestDB.panelWidth = math.floor(f:GetWidth() + 0.5)
         VoidQuestDB.panelHeight = math.floor(f:GetHeight() + 0.5)
         -- keep the panel where it is (StartSizing re-anchors it to its top-left)
-        local a, _, _, x, y = f:GetPoint()
-        VoidQuestDB.guidePoint = { a, x, y }
+        local a, _, r, x, y = f:GetPoint()
+        VoidQuestDB.guidePoint = { a, x, y, r }
         mod:ApplyWidth()
         mod:Refresh()
     end
@@ -2726,6 +2730,18 @@ function mod:EnsurePanel()
             GameTooltip:Show()
         end)
         f.bookBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- the route planner (RoutePlan.lua): the best order for the quests you have
+        f.routeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        f.routeBtn:SetSize(46, 18); f.routeBtn:SetPoint("TOPRIGHT", f.bookBtn, "TOPLEFT", -3, 0)
+        f.routeBtn:SetText("Route")
+        f.routeBtn:SetScript("OnClick", function() if VQ.Route then VQ.Route:Toggle() end end)
+        f.routeBtn:SetScript("OnEnter", function(s)
+            GameTooltip:SetOwner(s, "ANCHOR_LEFT")
+            GameTooltip:AddLine("Route plan")
+            GameTooltip:AddLine("The best order for the quests you have: where to go, what to do, what to turn in, with the time and XP per hour.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        f.routeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
     -- (2026-11-10: no Share button any more; each quest line has a small "S" in a group, see
@@ -2736,6 +2752,8 @@ function mod:EnsurePanel()
     local function pinClick()
         -- shift: VoidGPS guides you there instead (the tooltip says so when it's in another zone)
         if IsShiftKeyDown() and mod:GuideToQuest(mod._stepQid) then return end
+        -- ctrl: ask VoidQuest players on this quest to group (GroupUp.lua, WoW Forever)
+        if IsControlKeyDown() and VQ.GroupUp and mod._stepQid then VQ.GroupUp:Ask(mod._stepQid); return end
         mod:TakeTrack(); mod._sidePin = nil
         -- lock the arrow to THIS quest until it's turned in / dropped (see Waypoint, Resolve)
         mod._pinLock = mod._stepQid and { qid = mod._stepQid, step = mod._shownStep } or nil
@@ -3247,6 +3265,30 @@ function mod:QuestBlockEntries(skip)
         if #list == 0 then list[1] = { header = "No dungeon quests in your log" } end
         return list, {}
     end
+    -- inside a dungeon: only ITS quests from your log (the user, 2026-11-11, in Razorfen Kraul with
+    -- none of its quests: "voidquests showing too many quests in dungeon, should only show the ones
+    -- im on"); everything else waits under "+N more", and an empty list says so
+    if inDungeon then
+        for _, e in ipairs(area) do out[#out + 1] = e end
+        local added, mineN = {}, 0
+        for _, list in ipairs({ inZone, dungeons, others }) do
+            for _, e in ipairs(list) do
+                if e.qid and not added[e.qid] then
+                    added[e.qid] = true
+                    if self:IsThisInstanceQuest(e.qid) then
+                        out[#out + 1] = e; mineN = mineN + 1
+                    else
+                        rest[#rest + 1] = e
+                    end
+                end
+            end
+        end
+        if mineN == 0 and #area == 0 then
+            local name = GetInstanceInfo and GetInstanceInfo()
+            out[#out + 1] = { header = ("No quests of yours for %s"):format(type(name) == "string" and name ~= "" and name or "this dungeon") }
+        end
+        return out, rest
+    end
     for _, e in ipairs(area) do out[#out + 1] = e end
     for _, e in ipairs(inZone) do out[#out + 1] = e end
     -- without tabs (retail, campaigns) dungeons are a group in the same list; on the
@@ -3294,7 +3336,11 @@ local QUEST_HINTS = {
 
 function mod:QuestHint(qid)
     local t = qid and safe(C_QuestLog.GetTitleForQuestID, qid)
-    return t and QUEST_HINTS[NormName(t)]
+    local h = t and QUEST_HINTS[NormName(t)]
+    -- WoW Forever: an item it needs comes from another quest (Catch of the Day -> Fish in a Bucket)
+    local src = VQ.Forever and VQ.Forever.ItemSourceNote and VQ.Forever:ItemSourceNote(qid)
+    if src then h = h and (h .. " " .. src) or src end
+    return h
 end
 
 -- Right-click a quest line: its full page in Blizzard's quest log (left-click tracks it).
@@ -3402,6 +3448,20 @@ local function LevelColor(qid)
     local function hex(v) return math.floor(math.max(0, math.min(1, v)) * 255 + 0.5) end
     return ("%02x%02x%02x"):format(hex(c.r), hex(c.g), hex(c.b)), lvl
 end
+
+-- "[30] " in front of a quest's name, like Questie (the user, 2026-11-11: "do the questie basics
+-- first"): "[30D]" dungeon, "[30R]" raid, "[30+]" elite (WoW Forever's quest flags). Settings >
+-- "Show quest levels" (on by default).
+local function LevelTag(qid)
+    if VQ:Get("questLevels") == false then return "" end
+    local _, lvl = LevelColor(qid)
+    if not lvl then return "" end
+    local r = VQ.ForeverQuests and VQ.ForeverQuests[qid]
+    local f = r and r[6] or ""
+    local mark = (f:find("R") and "R") or (f:find("D") and "D") or (f:find("E") and "+") or ""
+    return ("[%d%s] "):format(lvl, mark)
+end
+mod.LevelTag = LevelTag
 
 -- Who in your group (party or raid, not you) is on this quest: count and names.
 -- C_QuestLog.IsUnitOnQuest is what Blizzard's own quest log uses for party members.
@@ -3541,11 +3601,35 @@ local function SetLineParty(holder, fs, n, shareQid)
         holder.party:SetText(tostring(n))
         bg:SetWidth(math.max(11, (holder.party:GetStringWidth() or 6) + 6))
         bg:Show(); holder.party:Show()
-        fs:SetPoint("RIGHT", bg, "LEFT", -4, 0)
+        edge, gap = bg, -3
     else
         holder.party:SetText(""); holder.party:Hide(); bg:Hide()
-        fs:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", edge == holder and 0 or -4, 0)
     end
+    -- WoW Forever: other VoidQuest players in this zone on the quest (GroupUp.lua), a grey
+    -- number left of the group badge. No pop-up: the user, 2026-11-11, "find a way to not make
+    -- that information super annoying".
+    local here = shareQid and VQ.GroupUp and VQ.GroupUp:Here(shareQid) or 0
+    if here > 0 then
+        if not holder.hereBg then
+            local hb = holder:CreateTexture(nil, "ARTWORK")
+            hb:SetColorTexture(0.32, 0.32, 0.36, 1)
+            hb:SetHeight(11)
+            holder.hereBg = hb
+            holder.here = holder:CreateFontString(nil, "OVERLAY"); VQ:SetFont(holder.here, 9, "")
+            holder.here:SetPoint("CENTER", hb, "CENTER", 0, 0)
+            holder.here:SetTextColor(1, 1, 1)
+        end
+        local hb = holder.hereBg
+        holder.here:SetText(tostring(here))
+        hb:SetWidth(math.max(11, (holder.here:GetStringWidth() or 6) + 6))
+        hb:ClearAllPoints()
+        hb:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", gap, 0)
+        hb:Show(); holder.here:Show()
+        edge, gap = hb, -3
+    elseif holder.hereBg then
+        holder.hereBg:Hide(); holder.here:Hide()
+    end
+    fs:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", edge == holder and 0 or -4, 0)
 end
 local function SetRowParty(row, n, qid) SetLineParty(row, row.text, n, qid) end
 
@@ -3631,6 +3715,15 @@ local function QuestTipWithGroup(qid, zone, groupNames, clickHint)
         if groupNames then
             GameTooltip:AddLine("In your group on this quest: " .. groupNames, .53, .8, 1, true)
         end
+        -- WoW Forever: other VoidQuest players here on it, and ask them to group (GroupUp.lua)
+        local here = VQ.GroupUp and VQ.GroupUp:Here(qid) or 0
+        if here > 0 then
+            GameTooltip:AddLine(("%d other VoidQuest player%s in this zone %s on this quest"):format(here, here == 1 and "" or "s",
+                here == 1 and "is" or "are"), .75, .75, .8, true)
+        end
+        if VQ.GroupUp and VQ.GroupUp:CanOffer(qid) then
+            GameTooltip:AddLine("Ctrl-click: group up with VoidQuest players on this quest", .6, .6, .6)
+        end
         -- where its items come from, as you've looted them (Drops.lua)
         if VQ.Drops then VQ.Drops:AddQuestLines(GameTooltip, qid) end
         -- grey quests: worth keeping, or low value (Chains.lua)
@@ -3706,7 +3799,7 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             local done = safe(C_QuestLog.IsComplete, qid)
             local sum = done and "" or ObjSummary(qid)
             text = ("%s%s%s|cff%s%s|r%s%s"):format(mark, star, done and "|cff55ff55Turn in:|r " or "",
-                (LevelColor(qid)), truncTo(QuestTitle(e), 28), tag,
+                (LevelColor(qid)), truncTo(LevelTag(qid) .. QuestTitle(e), 28), tag,
                 sum ~= "" and ("|cffaaaaaa: %s|r"):format(sum) or "")
             local nGroup, groupNames = GroupOnQuest(qid)
             row.tip = QuestTipWithGroup(qid, e.zone, groupNames)
@@ -3714,6 +3807,7 @@ function mod:RenderQuestBlock(f, anchor, fit, skip)
             row.shareQid = qid
             row:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
                 if IsShiftKeyDown() and mod:GuideToQuest(qid) then   -- shift: VoidGPS guides you to its next stop
+                elseif IsControlKeyDown() and VQ.GroupUp then VQ.GroupUp:Ask(qid)   -- ctrl: group up (GroupUp.lua)
                 elseif IsAltKeyDown() then ShareQuest(qid)
                 elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
             end)
@@ -3903,9 +3997,17 @@ function mod:RenderQuestList(f, popH)
         elseif kinds[qid] or isLocal then localQ[#localQ + 1] = qid
         else elsewhere[#elsewhere + 1] = qid end
     end
+    local noneHere   -- inside a dungeon with none of its quests: say so, nothing else listed
     if #localQ > 0 or scen then
         for _, qid in ipairs(elsewhere) do overflow[#overflow + 1] = { qid = qid, zone = (QuestZone(qid)) } end
         quests = localQ
+    elseif InDungeon() then
+        -- the user, 2026-11-11: "should only show the ones im on" (every other zone's quest filled it)
+        for _, qid in ipairs(elsewhere) do overflow[#overflow + 1] = { qid = qid, zone = (QuestZone(qid)) } end
+        quests = {}
+        local name = GetInstanceInfo and GetInstanceInfo()
+        noneHere = type(name) == "string" and name ~= "" and name or "this dungeon"
+        f.camp:SetText(("|cff00c7ff%s|r |cff888888no quests of yours here|r"):format(noneHere)); mod:FitHeader(f)
     else
         for _, qid in ipairs(elsewhere) do zoneTag[qid] = (QuestZone(qid)) end
         quests = elsewhere
@@ -3991,7 +4093,7 @@ function mod:RenderQuestList(f, popH)
         -- grey quests that matter: a yellow star in front (Chains.lua); no star = abandon
         local star = (VQ.Chains and not kinds[qid]) and VQ.Chains:Star(qid) or ""
         local mark = (qid == tracked) and "|cff55ff55> |r" or ""
-        row.title:SetText(mark .. star .. "|cff" .. (LevelColor(qid)) .. truncTo(title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
+        row.title:SetText(mark .. star .. "|cff" .. (LevelColor(qid)) .. truncTo(LevelTag(qid) .. title, zoneTag[qid] and 26 or 36) .. "|r" .. tag)
         local obj = ""
         local pct = (not complete) and ProgressPercent(qid) or nil
         if complete then
@@ -4010,6 +4112,7 @@ function mod:RenderQuestList(f, popH)
         SetProgress(row.bar, pct)
         row.btn:SetScript("OnClick", function(_, btn)   -- right: the whole quest; left: track
             if IsShiftKeyDown() and mod:GuideToQuest(qid) then   -- shift: VoidGPS guides you to its next stop
+            elseif IsControlKeyDown() and VQ.GroupUp then VQ.GroupUp:Ask(qid)   -- ctrl: group up (GroupUp.lua)
             elseif IsAltKeyDown() then ShareQuest(qid)
             elseif btn == "RightButton" then OpenQuestDetails(qid) else mod:ToggleTrack(qid); mod:Refresh() end
         end)
@@ -4163,7 +4266,7 @@ end
 -- buttons keep their size while they fit; on a narrow panel they shrink, never below their text,
 -- and switch to the small font when even that doesn't fit. Runs on resize and title changes.
 local FOOTER_RIGHT = 62   -- grip + tracker box + gear, from the right edge to the first text button
-local FOOTER_BTNS = { { "densityBtn", 42 }, { "pickBtn", 42 }, { "zoneBtn", 46 }, { "bookBtn", 46 } }
+local FOOTER_BTNS = { { "densityBtn", 42 }, { "pickBtn", 42 }, { "zoneBtn", 46 }, { "bookBtn", 46 }, { "routeBtn", 46 } }
 function mod:FitHeader(f)
     f = f or self.frame   -- the build passes its panel: self.frame isn't set yet then
     if not (f and f.densityBtn) then return end
@@ -4424,6 +4527,9 @@ function mod:Refresh()
             if more > 0 then obj = obj .. (obj ~= "" and "  " or "") .. ("|cff888888(+%d in-scope)|r"):format(more) end
         end
         if who then obj = ("|cffffffff%s|r"):format(who) .. (obj ~= "" and "  " .. obj or "") end
+        -- an escort's giver can be away on someone else's escort (WoW Forever, 2026-11-11)
+        local esc = step.status == "pickup" and VQ.Forever and VQ.Forever.EscortNote and VQ.Forever:EscortNote(step.qid)
+        if esc then obj = obj .. (obj ~= "" and "  " or "") .. "|cffffd200" .. esc .. "|r" end
         if r.levelGate then
             local lvl = UnitLevel("player") or 0
             local why
@@ -4593,6 +4699,7 @@ function mod:EnsurePicker()
     p:SetFrameStrata("DIALOG"); p:SetToplevel(true)
     p:SetMovable(true); p:EnableMouse(true); p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving); p:SetScript("OnDragStop", p.StopMovingOrSizing)
+    ns.Move(p, { db = function() return VoidQuestDB end, key = "guideFocus" })   -- drag + kept after a restart (VoidMove.lua)
     VQ:CreateBackdrop(p, 0.95)
     p.title = p:CreateFontString(nil, "OVERLAY"); VQ:SetFont(p.title, 13, "OUTLINE")
     p.title:SetPoint("TOP", 0, -8); p.title:SetText("Guide Focus \226\128\148 campaign + lines")
@@ -4697,6 +4804,7 @@ function mod:EnsureCampaignSelect()
     p:SetFrameStrata("FULLSCREEN_DIALOG"); p:SetToplevel(true)   -- above Settings, offset to the right
     p:SetMovable(true); p:EnableMouse(true); p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving); p:SetScript("OnDragStop", p.StopMovingOrSizing)
+    ns.Move(p, { db = function() return VoidQuestDB end, key = "campaignSelect" })   -- drag + kept after a restart (VoidMove.lua)
     VQ:CreateBackdrop(p, 0.96)
     p.title = p:CreateFontString(nil, "OVERLAY"); VQ:SetFont(p.title, 13, "OUTLINE")
     p.title:SetPoint("TOP", 0, -8); p.title:SetText("Select Campaign to follow")
@@ -4836,6 +4944,7 @@ function mod:EnsureQuestLog()
     p:SetFrameStrata("FULLSCREEN_DIALOG"); p:SetToplevel(true)
     p:SetMovable(true); p:EnableMouse(true); p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving); p:SetScript("OnDragStop", p.StopMovingOrSizing)
+    ns.Move(p, { db = function() return VoidQuestDB end, key = "myQuests" })   -- drag + kept after a restart (VoidMove.lua)
     VQ:CreateBackdrop(p, 0.96)
     p.title = p:CreateFontString(nil, "OVERLAY"); VQ:SetFont(p.title, 13, "OUTLINE")
     p.title:SetPoint("TOP", 0, -8); p.title:SetText("My Quests \226\128\148 click to track + waypoint")
@@ -5083,7 +5192,7 @@ do
     end
     -- Remember WHO gives / takes each quest (the API never exposes it until you talk to them).
     -- Account-wide: quest givers are static game data, so Vede's run teaches Murrath's panel.
-    local function remember(qid, role)
+    local function remember(qid, role, at)
         -- a PLAYER as "npc" (a party member sharing a quest, or yourself) is no quest giver,
         -- and player names must never end up in the shipped seed (tools/cmd/vq-seed)
         if safe(UnitIsPlayer, "npc") or safe(UnitIsPlayer, "questnpc") then return end
@@ -5096,6 +5205,17 @@ do
         VoidQuestDB.npcs = VoidQuestDB.npcs or {}
         local e = VoidQuestDB.npcs[qid] or {}
         e[role] = npc
+        -- the turn-in window: you stand at the NPC or object, so where you are is where it's handed in
+        -- (the user, 2026-11-11: Helcular's Revenge part 2 was turned in somewhere else than planned)
+        if role == "turnin" and at and not (IsInInstance and IsInInstance()) then
+            local m = safe(C_Map.GetBestMapForUnit, "player")
+            local pos = m and safe(C_Map.GetPlayerMapPosition, m, "player")
+            local x, y
+            if pos and pos.GetXY then x, y = pos:GetXY() end
+            if x and y and not (issecretvalue and (issecretvalue(x) or issecretvalue(y))) and x > 0 and y > 0 then
+                e.tm, e.tx, e.ty = m, math.floor(x * 10000 + 0.5) / 10000, math.floor(y * 10000 + 0.5) / 10000
+            end
+        end
         VoidQuestDB.npcs[qid] = e
     end
     af:SetScript("OnEvent", function(_, event)
@@ -5107,7 +5227,7 @@ do
         elseif event == "QUEST_DETAIL" then
             remember(safe(GetQuestID), "giver")
         elseif event == "QUEST_COMPLETE" or event == "QUEST_PROGRESS" then
-            remember(safe(GetQuestID), "turnin")
+            remember(safe(GetQuestID), "turnin", event == "QUEST_COMPLETE")
         end
         if not mod:AutoEnabled() then return end
         local set, campID = mod:ChainSet()

@@ -426,6 +426,26 @@ local function send(msg, to)
     end
 end
 
+----------------------------------------------------------------------
+-- For GroupUp.lua (asking players on the same quest to group): whispers that go before
+-- everything else waiting (a group ask is live, a held find can wait), the member list,
+-- and your own name.
+----------------------------------------------------------------------
+function Share:SendNow(msg, to)
+    if not to or not enabled() or #queue >= QUEUE_MAX then return false end
+    table.insert(queue, 1, { msg = msg, to = to })
+    if not sending then
+        pump()
+        sending = C_Timer.NewTicker(SEND_EVERY, pump)
+    end
+    return true
+end
+function Share:Members(k) requestRoster(); return pick(k) end
+function Share:Me() return me end
+function Share:Canon(name) return canon(name) end
+function Share:On() return enabled() and not blocked() end
+Share.SEND_EVERY = SEND_EVERY
+
 -- Pack entries into as few messages as fit under MAX_LEN, each to every target.
 local function sendEntries(tag, mapID, entries, targets)
     local head = ("%s:%s:%d:"):format(tag, PROTO, mapID)
@@ -970,6 +990,22 @@ end
 -- tools/cmd/forever-quests -facts folds the confirmed ones into ForeverQuests.lua.
 ----------------------------------------------------------------------
 local FACT_VALUES = 3     -- different values kept per quest and field
+-- i / p: rewards and reputation (above). e / w: escorts (EscortWatch.lua, 2026-11-11, the user:
+-- "we also need to collect that data from people actually doing the quests to validate"):
+--   e=1   the game showed it's an escort-type quest (a group member's escort-start prompt, or
+--         it failed with no time limit)
+--   w=N   how long the giver took to show up for someone standing at the spot, in minutes,
+--         bucketed 0 (there) / 2 / 5 / 10 / 15 (15 or more)
+-- m / x: how players really do the quest (QuestTime.lua, 2026-11-11, the user approving the
+-- Questie list: "time per quest -> XP/hour", "quests players give up on"):
+--   m=N   minutes it took a solo player within 2 levels of the quest from taking it to finishing it, bucketed 2 / 5 / 10 /
+--         15 / 20 / 30 / 45 / 60 (60 or more)
+--   x=1   a player gave up on it: abandoned after 10+ minutes of work, unfinished, not grey
+-- None of these has a shipped value to differ from, so they're always shared. (Not "t": a
+-- quest's own record already uses t, hold and sent for its bookkeeping.)
+local FACT_FIELDS = { "i", "p", "e", "w", "m", "x" }
+local WAIT_BUCKETS = { ["0"] = true, ["2"] = true, ["5"] = true, ["10"] = true, ["15"] = true }
+local TIME_BUCKETS = { ["2"] = true, ["5"] = true, ["10"] = true, ["15"] = true, ["20"] = true, ["30"] = true, ["45"] = true, ["60"] = true }
 local function facts()
     VoidQuestDB.facts = VoidQuestDB.facts or { own = {}, heard = {} }
     local f = VoidQuestDB.facts
@@ -980,7 +1016,7 @@ end
 -- the shipped value, in the same form, to compare with
 local function shippedFact(qid, field)
     local r = VQ.ForeverQuests[qid]
-    if not r then return nil end
+    if not r or (field ~= "i" and field ~= "p") then return nil end
     local out = {}
     if field == "i" then
         for s in (r[11] or ""):gmatch("%d+") do out[#out + 1] = tonumber(s) end
@@ -998,7 +1034,7 @@ local factTicker
 local function anyUnsent(f)
     for _, e in pairs(f.own) do
         local sent = e.sent or {}
-        if (e.i and not sent.i) or (e.p and not sent.p) then return true end
+        for _, k in ipairs(FACT_FIELDS) do if e[k] and not sent[k] then return true end end
     end
     return false
 end
@@ -1007,7 +1043,7 @@ local function flushFacts()
     local f, now, due = facts(), time(), {}
     for q, e in pairs(f.own) do
         e.sent = e.sent or {}
-        for _, field in ipairs({ "i", "p" }) do
+        for _, field in ipairs(FACT_FIELDS) do
             if e[field] and not e.sent[field] and now >= (e.t or 0) + (e.hold or HOLD_MIN) and #due < FLUSH_MAX then
                 due[#due + 1] = { q, field, e[field] }
             end
@@ -1044,7 +1080,9 @@ local function noteFact(qid, field, value)
         if e and e[field] then
             e[field] = nil
             if e.sent then e.sent[field] = nil end
-            if not e.i and not e.p then f.own[qid] = nil end
+            local any = false
+            for _, k in ipairs(FACT_FIELDS) do if e[k] then any = true end end
+            if not any then f.own[qid] = nil end
         end
         return
     end
@@ -1132,11 +1170,14 @@ end
 -- values could otherwise fill every slot); a full list makes room by dropping a value only
 -- one player backs.
 local function takeFact(qid, body, sender)
-    local field, value = body:match("^([ip])=([%d%.]+)$")
+    local field, value = body:match("^([ipewmx])=([%d%.]+)$")
     if not field or #value > 120 or not VQ.ForeverQuests[qid] then tally("dropped", "fact"); return end
+    if ((field == "e" or field == "x") and value ~= "1") or (field == "w" and not WAIT_BUCKETS[value])
+        or (field == "m" and not TIME_BUCKETS[value]) then tally("dropped", "fact"); return end
     local n = 0
     for _ in value:gmatch("%d+") do n = n + 1 end
-    if n == 0 or n > 16 or (field == "p" and n % 2 ~= 0) then tally("dropped", "fact"); return end
+    local single = field == "e" or field == "w" or field == "m" or field == "x"
+    if n == 0 or n > 16 or (field == "p" and n % 2 ~= 0) or (single and n ~= 1) then tally("dropped", "fact"); return end
     local f = facts()
     local q = f.heard[qid] or {}
     f.heard[qid] = q
@@ -1165,6 +1206,28 @@ local function takeFact(qid, body, sender)
     c.v[h], c.n = true, c.n + 1
 end
 
+-- EscortWatch's observations go out the same way (held 10-20 min, then to FANOUT members).
+function Share:NoteFact(qid, field, value)
+    if field ~= "e" and field ~= "w" and field ~= "m" and field ~= "x" then return end
+    if (field == "w" and not WAIT_BUCKETS[value]) or (field == "m" and not TIME_BUCKETS[value])
+        or ((field == "e" or field == "x") and value ~= "1") then return end
+    noteFact(qid, field, value)
+end
+
+-- A fact's value: your own observation, else the one most players back (CONFIRM or more).
+function Share:FactValue(qid, field)
+    local f = VoidQuestDB and VoidQuestDB.facts
+    if not f then return nil end
+    local own = f.own and f.own[qid]
+    if own and own[field] then return own[field], true end
+    local q = f.heard and f.heard[qid]
+    local best, bestN
+    for v, c in pairs(q and q[field] or {}) do
+        if type(c) == "table" and c.n and c.n >= CONFIRM and (not bestN or c.n > bestN) then best, bestN = v, c.n end
+    end
+    return best, false, bestN
+end
+
 -- The reward items for a quest: your own observation, else a value CONFIRM players agree on.
 function Share:FactItems(qid)
     local f = VoidQuestDB and VoidQuestDB.facts
@@ -1187,9 +1250,19 @@ function Share:OnMessage(msg, sender, replyTo)
         if sender == me and nonce == pingNonce then pingGot = true end
         return
     end
+    -- GroupUp self-test (/vq group test): your own whispers play the other player
+    if sender == me and enabled() and VQ.GroupUp and VQ.GroupUp.testing and msg:match("^G%u:") then
+        pcall(VQ.GroupUp.OnMessage, VQ.GroupUp, msg, sender, replyTo)
+        return
+    end
     if not enabled() or sender == me or not VoidQuestDB then return end
     tally("got", msg)
     if not rateOK(sender) then tally("dropped", "rate"); return end
+    -- group asks (GroupUp.lua): GQ / GH / GA / GY / GN
+    if msg:match("^G%u:") then
+        if VQ.GroupUp then pcall(VQ.GroupUp.OnMessage, VQ.GroupUp, msg, sender, replyTo) end
+        return
+    end
     -- quest facts carry a quest ID where the others carry a map
     local fp, fq, fbody = msg:match("^F:(%d+):(%d+):(.+)$")
     if fp then
@@ -1493,17 +1566,19 @@ function Share:Stats()
     local fdb = VoidQuestDB and VoidQuestDB.facts
     for _, e in pairs(fdb and fdb.own or {}) do
         fo = fo + 1
-        if e.sent and (e.sent.i or e.sent.p) then fs = fs + 1 end
+        local sent = false
+        for _, k in ipairs(FACT_FIELDS) do if e.sent and e.sent[k] then sent = true end end
+        if sent then fs = fs + 1 end
     end
     for _, q in pairs(fdb and fdb.heard or {}) do
         fh = fh + 1
         local ok = false
-        for _, field in ipairs({ "i", "p" }) do   -- (q also holds the voter sets "iv" / "pv")
+        for _, field in ipairs(FACT_FIELDS) do   -- (q also holds the voter sets "iv" / "pv" / ...)
             for _, c in pairs(q[field] or {}) do if c.n >= CONFIRM then ok = true end end
         end
         if ok then fc = fc + 1 end
     end
-    VQ:Print(("Quest facts (rewards / reputation that differ from the shipped data): %d of your own (%d sent), %d quest%s heard about, %d confirmed by 2+ players."):format(
+    VQ:Print(("Quest facts (rewards / reputation that differ from the shipped data, escorts): %d of your own (%d sent), %d quest%s heard about, %d confirmed by 2+ players."):format(
         fo, fs, fh, fh == 1 and "" or "s", fc))
     local mobs, spots, mconf, mine, msent = self:MobStats()
     VQ:Print(("Quest-mob spots: %d of your own (%d sent), %d heard for %d mob%s, %d confirmed by %d+ players."):format(

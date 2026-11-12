@@ -17,6 +17,7 @@
 -- Following a zone guide takes over the guide panel (like picking a
 -- guide); "Stop" hands it back to the campaign. Per-character.
 ----------------------------------------------------------------------
+local _, ns = ...   -- ns.Move (VoidMove.lua)
 local VQ = VoidQuest
 local mod = VQ:NewModule("ZoneGuide")
 VQ.Zones = mod
@@ -550,6 +551,7 @@ function mod:EnsureWindow()
     p:SetFrameStrata("FULLSCREEN_DIALOG"); p:SetToplevel(true)
     p:SetMovable(true); p:EnableMouse(true); p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", p.StartMoving); p:SetScript("OnDragStop", p.StopMovingOrSizing)
+    ns.Move(p, { db = function() return VoidQuestDB end, key = "zoneGuides" })   -- drag + kept after a restart (VoidMove.lua)
     VQ:CreateBackdrop(p, 0.96)
     p.title = p:CreateFontString(nil, "OVERLAY"); VQ:SetFont(p.title, 13, "OUTLINE")
     p.title:SetPoint("TOP", 0, -8); p.title:SetText("Zone Guides")

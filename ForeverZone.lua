@@ -181,7 +181,9 @@ local function bitSet(mask, id)
     if not (mask and id and id > 0) then return true end
     return math.floor(mask / 2 ^ (id - 1)) % 2 == 1
 end
-local function doneQ(q) return safe(C_QuestLog.IsQuestFlaggedCompleted, q) == true end
+-- F.assumeDone: quests the route planner will have you turn in first (RoutePlan.lua asks "could
+-- I take this once those are done?" for follow-ups; nil the rest of the time)
+local function doneQ(q) return (F.assumeDone and F.assumeDone[q]) or safe(C_QuestLog.IsQuestFlaggedCompleted, q) == true end
 local function inLogQ(q) return safe(C_QuestLog.GetLogIndexForQuestID, q) ~= nil end
 local function titleQ(q)
     local t = C_QuestLog.GetTitleForQuestID and safe(C_QuestLog.GetTitleForQuestID, q)
@@ -316,12 +318,130 @@ function F:Rule(id)
     return nil
 end
 
+-- An escort's giver walks off with whoever took it and is gone for everyone until that escort
+-- ends (the user, 2026-11-11, at Free at Last: "there is no npc here to get it").
+-- EscortWatch adds quests players proved are escorts, and how long they waited at the giver.
+function F:EscortNote(id)
+    local W = VQ.EscortWatch
+    local isEscort = (VQ.ForeverEscort and VQ.ForeverEscort[id]) or (W and W:IsEscort(id))
+    if not isEscort then return nil end
+    local giver = VQ.Starts and VQ.Starts.Giver and VQ.Starts:Giver(id)
+    local wait = W and W:Wait(id)
+    local back = (wait and wait > 0) and ("Players waited about %d%s minutes."):format(wait, wait >= 15 and "+" or "")
+        or "Back in a few minutes."
+    return ("Escort quest: if %s isn't here, another player is on the escort. %s"):format(giver or "the giver", back)
+end
+
+-- Items a quest needs that ANOTHER quest gives as its reward (the user, 2026-11-12, Catch of the
+-- Day: "Talk to Jinar'Zillen ... bring 2 Bloodbelly Fish", and Jinar'Zillen only offers "Fish in a
+-- Bucket", which looks like a low-level side quest but is how you get the fish).
+-- Reward names come from ForeverQuests (field 10: "A", "A, B" or "choose: A / B").
+local rewardIndex   -- lower-case item name -> { quest ids that reward it }
+local function RewardIndex()
+    if rewardIndex then return rewardIndex end
+    rewardIndex = {}
+    for id, r in pairs(VQ.ForeverQuests or {}) do
+        local s = type(r[10]) == "string" and r[10]:gsub("^choose:%s*", "") or ""
+        for name in (s .. ","):gsub("%s*/%s*", ","):gmatch("%s*([^,]-)%s*,") do
+            if name ~= "" then
+                local k = name:lower()
+                local t = rewardIndex[k]
+                if not t then t = {}; rewardIndex[k] = t end
+                t[#t + 1] = id
+            end
+        end
+    end
+    return rewardIndex
+end
+
+-- An objective's item name: "Bloodbelly Fish: 0/2" or "0/2 Bloodbelly Fish".
+local function objectiveItem(o)
+    if type(o) ~= "table" or o.finished or type(o.text) ~= "string" then return nil end
+    if issecretvalue and issecretvalue(o.text) then return nil end
+    if o.type and o.type ~= "item" then return nil end
+    local n = o.text:match("^(.-):%s*%d+%s*/%s*%d+") or o.text:match("^%d+%s*/%s*%d+%s+(.+)$")
+    return n and n ~= "" and n or nil
+end
+
+-- -> { { item, src, title, giver, spot }, ... } for the unfinished item objectives of a quest in
+-- your log that another quest hands out. The source quest whose giver the quest's own text names
+-- wins (Catch of the Day names Jinar'Zillen), then one in the same zone. Done ones that can't be
+-- repeated are skipped.
+function F:ItemSources(qid)
+    if not (qid and VQ.ForeverQuests) then return nil end
+    local objs = safe(C_QuestLog.GetQuestObjectives, qid)
+    if type(objs) ~= "table" or #objs == 0 then return nil end
+    local idx, out = RewardIndex(), nil
+    local own = VQ.ForeverQuests[qid]
+    local text = ""
+    local li = safe(C_QuestLog.GetLogIndexForQuestID, qid)
+    if li and GetQuestLogQuestText then
+        local ok, story, todo = pcall(GetQuestLogQuestText, li)
+        if ok then text = ((type(todo) == "string" and todo or "") .. " " .. (type(story) == "string" and story or "")) end
+        if issecretvalue and issecretvalue(text) then text = "" end
+    end
+    for _, o in ipairs(objs) do
+        local item = objectiveItem(o)
+        local list = item and idx[item:lower()]
+        if list then
+            local best, bestScore
+            for _, src in ipairs(list) do
+                local r = VQ.ForeverQuests[src]
+                local repeatable = r and type(r[6]) == "string" and r[6]:find("[rdw]") ~= nil
+                if src ~= qid and r and (repeatable or self:Status(src) ~= "done") then
+                    local giver = VQ.Starts and VQ.Starts:Giver(src)
+                    local named = giver and text:find(giver, 1, true) ~= nil
+                    local sameZone = own and r[2] == own[2]
+                    -- only a real hand-off: the quest names its giver, or it's a no-XP quest in the same
+                    -- zone (Fish in a Bucket). Plain rewards (Catch of the Day itself gives Mithril Ore)
+                    -- mustn't send someone who needs ore off to a quest.
+                    if named or (sameZone and (tonumber(r[4]) or 0) == 0) then
+                        local score = (named and 4 or 0) + (sameZone and 2 or 0) + (self:Spot(src) and 1 or 0)
+                        if not bestScore or score > bestScore then best, bestScore = src, score end
+                    end
+                end
+            end
+            if best then
+                -- what the source quest asks for in turn (the user, 2026-11-12: Fish in a Bucket wants 5
+                -- Shellfish, from Shellfish Traps by Shadowprey or the Auction House)
+                local asks
+                for _, m in ipairs(VQ.ForeverMobs and VQ.ForeverMobs[best] or {}) do
+                    if m[1] == "d" and (m[3] or 0) ~= 0 then
+                        local iname = C_Item and C_Item.GetItemNameByID and safe(C_Item.GetItemNameByID, m[3])
+                        local from = VQ.ForeverMobNames and VQ.ForeverMobNames[m[2]]
+                        if iname and not (asks and asks:find(iname, 1, true)) then
+                            asks = (asks and (asks .. ", ") or "") .. iname .. (from and (" from a " .. from) or "")
+                        end
+                    end
+                end
+                out = out or {}
+                out[#out + 1] = { item = item, src = best, title = VQ.ForeverQuests[best][1],
+                    giver = VQ.Starts and VQ.Starts:Giver(best), spot = self:Spot(best), asks = asks }
+            end
+        end
+    end
+    return out
+end
+
+-- "Bloodbelly Fish: take 'Fish in a Bucket' from Jinar'Zillen (it gives them)." or nil
+function F:ItemSourceNote(qid)
+    local list = self:ItemSources(qid)
+    if not list then return nil end
+    local parts = {}
+    for _, s in ipairs(list) do
+        parts[#parts + 1] = ("%s: take '%s'%s, it gives them%s."):format(s.item, s.title or "?",
+            s.giver and (" from " .. s.giver) or "",
+            s.asks and (" (it asks for " .. s.asks .. ", or buy them)") or "")
+    end
+    return table.concat(parts, " ")
+end
+
 function F:Available(id)
     if lowLevelHidden(id) then
         return false, "Low level: Blizzard hides these (map Filter > Low-Level Quests shows them)"
     end
     local lvl = UnitLevel("player") or 0
-    local b = VoidQuestCharDB and VoidQuestCharDB.blocked and VoidQuestCharDB.blocked[id]
+    local b = not self.assumeDone and VoidQuestCharDB and VoidQuestCharDB.blocked and VoidQuestCharDB.blocked[id]
     if b and lvl <= b then return false, "Not offered to you yet (level or an earlier quest first)" end
     -- a known earlier quest you haven't turned in: no "!" yet, and say which one
     -- what NorgannonDB says the quest needs (F:Rule); only quests it has nothing on fall back to
@@ -575,7 +695,12 @@ local function Tooltip(owner, id, anchor)
     if #bits > 0 then GameTooltip:AddLine(table.concat(bits, ", "), 0.7, 0.7, 0.7) end
     if info.zone then GameTooltip:AddLine(info.zone, 0.53, 0.8, 1) end
     local st = F:Status(id)
-    GameTooltip:AddLine(st == "done" and "Done" or st == "log" and "In your quest log" or "Not done", 1, 1, 1)
+    local doneLine = "Done"
+    if st == "done" and VQ.QuestTime then
+        local t, lv = VQ.QuestTime:History(id)
+        if t then doneLine = ("Done %s%s"):format(date("%b %d, %Y", t), lv and (" at level %d"):format(lv) or "") end
+    end
+    GameTooltip:AddLine(st == "done" and doneLine or st == "log" and "In your quest log" or "Not done", 1, 1, 1)
     if st == "open" then
         local ok, why = F:Available(id)
         if not ok then GameTooltip:AddLine(why, 1, 0.5, 0.3, true) end
@@ -585,6 +710,7 @@ local function Tooltip(owner, id, anchor)
         if seen then GameTooltip:AddLine(("Offered to a level %d character"):format(seen), 0.7, 0.7, 0.7) end
     end
     if info.xp and info.xp > 0 then GameTooltip:AddLine(("%d XP"):format(info.xp), 1, 1, 1) end
+    -- (the quest time comes with VQ.Worth:AddTooltip below; adding it here too doubled it, Codex 11-12)
     if info.money and info.money > 0 then
         -- the global GetCoinTextureString doesn't exist on WoW Forever (C_CurrencyInfo has it)
         local coin = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or _G.GetCoinTextureString
@@ -601,6 +727,8 @@ local function Tooltip(owner, id, anchor)
     if VQ.Worth then VQ.Worth:AddTooltip(GameTooltip, id) end
     local giver = VQ.Starts and VQ.Starts:Giver(id)
     if giver then GameTooltip:AddLine("Given by " .. giver, 0.6, 1, 0.6) end
+    local esc = st == "open" and F:EscortNote(id)
+    if esc then GameTooltip:AddLine(esc, 1, 0.82, 0, true) end
     GameTooltip:AddLine(" ")
     if st == "log" then
         GameTooltip:AddLine("Click: track it", 0.6, 0.6, 0.6)
@@ -628,6 +756,7 @@ local function Build()
     f:SetFrameStrata("HIGH"); f:SetToplevel(true)
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    ns.Move(f, { db = function() return VoidQuestDB end, key = "foreverZone" })   -- drag + kept after a restart (VoidMove.lua)
     f:SetClampedToScreen(true)
     VQ:CreateBackdrop(f)
     tinsert(UISpecialFrames, "VoidQuestForeverZone")   -- Esc closes it
@@ -859,3 +988,72 @@ ev:SetScript("OnEvent", function(_, e, arg)
     end
     F:Refresh()
 end)
+
+----------------------------------------------------------------------
+-- Hover an NPC: the quests it has for you and the ones you can hand in to it (the user,
+-- 2026-11-11: "do the questie basics first"). WoW Forever's own tooltips already show quest
+-- progress on mobs ("objective 3/8", the same tooltip data QuestMobs.lua reads), but with no
+-- "!" anywhere, a giver says nothing about its quests. Givers and turn-ins by name, from the
+-- learned / shared / shipped data (QuestStarts.lua).
+----------------------------------------------------------------------
+local giverIndex, giverIndexAt = nil, 0
+local function GiverIndex()
+    -- rebuilt now and then: learned and shared givers come in while you play
+    if giverIndex and GetTime() - giverIndexAt < 120 then return giverIndex end
+    giverIndex, giverIndexAt = {}, GetTime()
+    if not VQ.Starts then return giverIndex end
+    for qid in pairs(VQ.ForeverQuests or {}) do
+        local g = VQ.Starts:Giver(qid)
+        if g then
+            local l = giverIndex[g]
+            if not l then l = {}; giverIndex[g] = l end
+            l[#l + 1] = qid
+        end
+    end
+    return giverIndex
+end
+
+local NPC_LINES = 4
+local function NpcTooltip(tt)
+    if tt ~= GameTooltip or not F:Active() then return end
+    local _, unit = tt:GetUnit()
+    if not unit or UnitIsPlayer(unit) or (UnitCanAttack and UnitCanAttack("player", unit)) then return end
+    local name = UnitName(unit)
+    if not name or Secret(name) then return end
+    local hand, offer = {}, {}
+    -- turn-ins first: quests in your log this NPC takes
+    for i = 1, (safe(C_QuestLog.GetNumQuestLogEntries) or 0) do
+        local info = safe(C_QuestLog.GetInfo, i)
+        local q = info and not info.isHeader and info.questID
+        if q and VQ.Starts and VQ.Starts:Turnin(q) == name then
+            local done = safe(C_QuestLog.IsComplete, q)
+            hand[#hand + 1] = (done and "|cff55ff55Turn in:|r " or "|cffaaaaaaTurn in later:|r ") .. (info.title or ("quest " .. q))
+        end
+    end
+    for _, q in ipairs(GiverIndex()[name] or {}) do
+        if F:Status(q) == "open" and F:Available(q) then
+            local info = F:Info(q)
+            local lv = F:Level(q)
+            local tag = (VQ.Guide and VQ.Guide.LevelTag) and VQ.Guide.LevelTag(q) or ""
+            if tag == "" and lv and lv > 0 and VQ:Get("questLevels") ~= false then tag = ("[%d] "):format(lv) end
+            offer[#offer + 1] = "|cffffd200Quest:|r " .. tag .. (info and info.title or ("quest " .. q))
+        end
+    end
+    if #hand == 0 and #offer == 0 then return end
+    tt:AddLine("|cff00c7ffVoidQuest|r")
+    local shown = 0
+    for _, l in ipairs(hand) do
+        if shown < NPC_LINES then tt:AddLine(l, 1, 1, 1, true); shown = shown + 1 end
+    end
+    for _, l in ipairs(offer) do
+        if shown < NPC_LINES then tt:AddLine(l, 1, 1, 1, true); shown = shown + 1 end
+    end
+    local more = #hand + #offer - shown
+    if more > 0 then tt:AddLine(("and %d more"):format(more), .7, .7, .7) end
+    tt:Show()
+end
+if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Unit then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tt) pcall(NpcTooltip, tt) end)
+elseif GameTooltip and GameTooltip.HookScript then
+    GameTooltip:HookScript("OnTooltipSetUnit", function(tt) pcall(NpcTooltip, tt) end)
+end

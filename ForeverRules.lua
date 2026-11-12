@@ -4650,3 +4650,10 @@ VoidQuest.ForeverRules = {
 [99267]={r=4294967373},
 [99411]={ml=5,r=8589934770},
 }
+VoidQuest.ForeverEscort = {
+[155]=true,[219]=true,[435]=true,[648]=true,[660]=true,[665]=true,[667]=true,[731]=true,[836]=true,[863]=true,
+[898]=true,[938]=true,[945]=true,[976]=true,[994]=true,[995]=true,[1144]=true,[1222]=true,[1270]=true,[1393]=true,
+[1440]=true,[2742]=true,[2767]=true,[2845]=true,[2904]=true,[3525]=true,[4121]=true,[4245]=true,[4261]=true,[4770]=true,
+[4901]=true,[4904]=true,[4966]=true,[5203]=true,[5321]=true,[5713]=true,[5821]=true,[5943]=true,[5944]=true,[6132]=true,
+[6403]=true,[6482]=true,[6523]=true,[6544]=true,[6641]=true,
+}

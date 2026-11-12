@@ -4,6 +4,7 @@
 -- of a box vanishes. VoidPX() asks for one real pixel, and the hook below (installed once, by
 -- the first Void addon loaded) turns snapping off on the edges of flat WHITE8X8 borders, like
 -- Blizzard's NineSliceUtil.DisableSharpening, so a 1 px line always covers a pixel.
+local _, ns = ...   -- ns.Move (VoidMove.lua)
 local function VoidPX()
     local s = UIParent and UIParent:GetEffectiveScale()
     if s and s > 0 and PixelUtil and PixelUtil.GetPixelToUIUnitFactor then return PixelUtil.GetPixelToUIUnitFactor() / s end
@@ -129,6 +130,7 @@ function VQ:ShowCopy(title, text)
         f:SetSize(600, 440); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG"); f:SetToplevel(true)
         f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
         f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+        ns.Move(f, { db = function() return VoidQuestDB end, key = "copy" })   -- drag + kept after a restart (VoidMove.lua)
         VQ:CreateBackdrop(f, 0.97)
         f.titleFS = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.titleFS, 13, "OUTLINE")
         f.titleFS:SetPoint("TOP", 0, -10)
@@ -188,6 +190,12 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         VQ:Set("share", not VQ:Get("share"))
         VQ:Print("Sharing quest givers with other players: " .. (VQ:Get("share") and "|cff55ff55ON|r" or "|cffff5555OFF|r"))
         if VQ.Settings and VQ.Settings.Sync then VQ.Settings:Sync() end
+    elseif VQ.Route and msg == "route" then   -- WoW Forever: the best order for your quests
+        VQ.Route:Toggle()
+    elseif VQ.GroupUp and msg == "group test" then   -- the whole flow with yourself as the other player
+        VQ.GroupUp:SelfTest()
+    elseif VQ.GroupUp and msg == "group" then   -- WoW Forever: group up on the tracked quest
+        VQ.GroupUp:AskTracked()
     elseif VQ.Share and msg == "net" then
         VQ.Share:SelfTest()
     elseif msg == "rewards" and _G.VoidQuestRewardAdvice then   -- marks on quest reward choices

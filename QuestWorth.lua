@@ -544,6 +544,8 @@ function W:AddTooltip(tt, qid)
     if not (tt and qid) then return end
     local lines = self:Lines(qid)
     for _, l in ipairs(lines) do tt:AddLine(l, 0.85, 0.85, 0.85, true) end
+    -- how long it really takes, from players (QuestTime.lua)
+    if VQ.QuestTime then VQ.QuestTime:AddTooltip(tt, qid) end
 end
 
 ----------------------------------------------------------------------
@@ -653,6 +655,9 @@ local function ShowBox()
     else
         body[1] = "|cffaaaaaaRegular quest, out in the world (solo)|r"
     end
+    -- how long it really takes and the XP/hour, from players (QuestTime.lua)
+    local tl = VQ.QuestTime and VQ.QuestTime:Line(qid)
+    if tl then body[#body + 1] = tl end
     if #own > 0 then body[#body + 1] = "|cff3ddc84This quest:|r " .. table.concat(own, ", ") end
     for _, l in ipairs(lines) do body[#body + 1] = l end
     b.text:SetText(table.concat(body, "\n"))

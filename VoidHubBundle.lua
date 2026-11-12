@@ -67,7 +67,9 @@ _G.VoidHubLaunchers = _G.VoidHubLaunchers or {}
 ----------------------------------------------------------------------
 _G.VoidHubToggles = _G.VoidHubToggles or {}
 do
-    local QUICK_VERSION = 2
+    -- 3: VoidSequencer, VoidPlates, VoidFrames and VoidCheatSheet listed on WoW Forever again (2 hid
+    -- them as Midnight-only; all four work there; the user, 2026-11-11: "seq is not in the new hud")
+    local QUICK_VERSION = 3
     if (_G.__VoidQuickVersion or 0) < QUICK_VERSION then
         _G.__VoidQuickVersion = QUICK_VERSION
         local Q = {}
@@ -84,8 +86,8 @@ do
             { "VoidGear", "Gear", 2 }, { "VoidBags", "Bags", 2 }, { "VoidAH", "Auction House", 2 },
             { "VoidProf", "Professions", 3 }, { "VoidGather", "Gathering", 3 }, { "VoidFisher", "Fishing", 3 },
             { "VoidBars", "Action bars", 4 }, { "VoidTank", "Tank tools", 4 }, { "VoidAlert", "Alerts", 4 },
-            { "VoidSequencer", "Sequencer", 4, true }, { "VoidPlates", "Nameplates", 4, true },
-            { "VoidFrames", "Party frames", 4, true }, { "VoidCheatSheet", "Cheat sheets", 4, true },
+            { "VoidSequencer", "Sequencer", 4 }, { "VoidPlates", "Nameplates", 4 },
+            { "VoidFrames", "Party frames", 4 }, { "VoidCheatSheet", "Cheat sheets", 4 },
             { "VoidRaidTools", "Raid tools", 4, true }, { "VoidRaidToolsReader", "VRT reader", 4, true },
             { "VoidDice", "Dice", 4 }, { "VoidComp", "Comp tool", 4 },
             { "VoidBounty", "Bounties", 5 }, { "VoidScout", "Scout", 5 }, { "VoidPug", "Pug tracker", 5 },
@@ -746,10 +748,26 @@ local function BuildInfoFrame()
     infoFrame:SetBackdropBorderColor(CYAN_R, CYAN_G, CYAN_B, 0.85)
     infoFrame:Hide()
     infoFrame:SetMovable(true)
+    infoFrame:SetClampedToScreen(true)
     infoFrame:EnableMouse(true)
     infoFrame:RegisterForDrag("LeftButton")
     infoFrame:SetScript("OnDragStart", infoFrame.StartMoving)
-    infoFrame:SetScript("OnDragStop", infoFrame.StopMovingOrSizing)
+    -- kept after a restart (the user, 2026-11-12: every box stays where it was moved). Inline, not
+    -- VoidMove.lua: whichever addon's bundle copy runs, it may not carry that file.
+    infoFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        if self.SetUserPlaced then self:SetUserPlaced(false) end
+        local p, _, rp, x, y = self:GetPoint(1)
+        VoidHubCharDB = VoidHubCharDB or {}
+        if p then VoidHubCharDB.infoPos = { p, rp, math.floor(x + 0.5), math.floor(y + 0.5) } end
+    end)
+    infoFrame:SetScript("OnShow", function(self)
+        local p = VoidHubCharDB and VoidHubCharDB.infoPos
+        if type(p) == "table" and type(p[1]) == "string" then
+            self:ClearAllPoints()
+            self:SetPoint(p[1], UIParent, p[2] or p[1], tonumber(p[3]) or 0, tonumber(p[4]) or 0)
+        end
+    end)
     table.insert(UISpecialFrames, "VoidHubInfo")
 
     -- Title

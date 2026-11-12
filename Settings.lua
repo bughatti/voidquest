@@ -6,6 +6,7 @@
 -- shared across chars). VQ:Get/Set apply defaults + push changes live so the
 -- guide/minimap react immediately -- no /reload needed.
 ----------------------------------------------------------------------
+local _, ns = ...   -- ns.Move (VoidMove.lua)
 local VQ = VoidQuest
 local mod = VQ:NewModule("Settings")
 VQ.Settings = mod
@@ -153,9 +154,10 @@ function mod:EnsurePanel()
     if self.frame then return self.frame end
     local f = CreateFrame("Frame", "VoidQuestSettings", UIParent, "BackdropTemplate")
     f._sync = {}
-    f:SetSize(372, 820); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG"); f:SetToplevel(true)
+    f:SetSize(372, 844); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG"); f:SetToplevel(true)
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    ns.Move(f, { db = function() return VoidQuestDB end, key = "settings" })   -- drag + kept after a restart (VoidMove.lua)
     f:SetClampedToScreen(true)
     VQ:CreateBackdrop(f, 0.96)
 
@@ -203,10 +205,13 @@ function mod:EnsurePanel()
 
     header(f, x, y, "General"); y = y - 24
     makeCheck(f, x, y, "Show minimap button", "minimapShow"); y = y - 24
+    makeCheck(f, x, y, "Show quest levels", "questLevels", "Puts the quest's level in front of its name on the panel's quest lines: [30], [30D] for a dungeon quest, [30R] raid, [30+] elite."); y = y - 24
     makeCheck(f, x, y, "Announce auto-actions in chat", "announceActions", "Print a line each time VoidQuest auto-accepts or turns in a quest."); y = y - 24
     if VQ.Share then
         makeCheck(f, x, y, "Share quest givers with other players", "share", "WoW Forever has no quest markers on the map. When you find a quest giver, VoidQuest tells a few other VoidQuest players online where it is (by hidden addon whisper), and learns the ones they find. Sent: the quest, the NPC and its spot. Like any whisper, the players who get it can see which character sent it, so your finds go out only after you've left that map (or 10-20 minutes later), never live. A spot is used once two players agree on it."); y = y - 24
-        f:SetHeight(850)
+        makeCheck(f, x, y, "Let VoidQuest players on your quest ask you to group", "groupAsks", "Another VoidQuest player in your zone on the same quest can Ctrl-click it to ask you to group, and you count toward the grey players-here number on their quest lines (only VoidQuest players in your zone see which quests you have, never your name): you get a pop-up with their name, level and class, and Accept or No thanks. Accept takes their invite. No thanks (or no answer in 5 minutes) means you are never asked about that quest again. You are only asked when you are solo, out of combat and outside instances, at most once every 3 minutes."); y = y - 24
+        makeCheck(f, x, y, "Say when VoidQuest players here share your quests", "groupArrival", "Arriving in a zone, one chat line when other VoidQuest players there are on your quests (\"3 VoidQuest players in The Barrens are on 2 of your quests\"), at most once per zone every 30 minutes. The numbers stay on the quest lines either way."); y = y - 24
+        f:SetHeight(922)
     end
 
     f:Hide()   -- created hidden so the FIRST click opens it (CreateFrame shows by default)

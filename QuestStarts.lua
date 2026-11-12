@@ -55,6 +55,15 @@ function S:Giver(qid)
     local h = not (n and n.giver) and not (st and st.npc) and not (s and s.giver) and Heard(qid)
     return (n and n.giver) or (st and st.npc) or (s and s.giver) or (h and h.npc)
 end
+-- Where a quest is handed in: where you stood at its turn-in window (CampaignGuide records it), else
+-- the seed's (NorgannonDB finisher NPC or object, tools/cmd/vq-seed). -> { m, x, y } or nil
+function S:TurninSpot(qid)
+    if not qid then return nil end
+    local n = VoidQuestDB and VoidQuestDB.npcs and VoidQuestDB.npcs[qid]
+    if n and n.tm and n.tx then return { m = n.tm, x = n.tx, y = n.ty } end
+    local s = Seed(qid)
+    if s and s.tm and s.tx then return { m = s.tm, x = s.tx, y = s.ty } end
+end
 function S:Turnin(qid)
     if not qid then return nil end
     local n = VoidQuestDB and VoidQuestDB.npcs and VoidQuestDB.npcs[qid]

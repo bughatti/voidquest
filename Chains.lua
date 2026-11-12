@@ -289,6 +289,8 @@ function C:Earlier(qid)
     for _, a in ipairs(ps) do
         local ok, done = pcall(C_QuestLog.IsQuestFlaggedCompleted, a)
         if ok and done == true then return nil end
+        -- the route planner's "once these are turned in" (RoutePlan.lua)
+        if VQ.Forever and VQ.Forever.assumeDone and VQ.Forever.assumeDone[a] then return nil end
         first = first or a
     end
     return first

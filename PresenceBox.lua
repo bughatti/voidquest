@@ -108,9 +108,17 @@ local function build()
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
     f:RegisterForClicks("RightButtonUp")
-    f:SetScript("OnDragStart", f.StartMoving)
+    -- the tooltip goes away while dragging (the user, 2026-11-12: "the tooltip completely covers the
+    -- box so its hard to see where i am dragging it")
+    f:SetScript("OnDragStart", function(self)
+        GameTooltip:Hide()
+        self.moving = true
+        self:StartMoving()
+    end)
     f:SetScript("OnDragStop", function(self)
+        self.moving = nil
         self:StopMovingOrSizing()
+        if self.SetUserPlaced then self:SetUserPlaced(false) end
         local pt, _, rel, x, y = self:GetPoint()
         db().pos = { pt, rel, x, y }
         changed()
@@ -123,7 +131,11 @@ local function build()
         end)
     end)
     f:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        if self.moving then return end
+        -- on the side with room: near the bottom of the screen a tooltip below is pushed up over the box
+        local _, cy = self:GetCenter()
+        local low = cy and UIParent:GetHeight() and cy < UIParent:GetHeight() / 2
+        GameTooltip:SetOwner(self, low and "ANCHOR_TOP" or "ANCHOR_BOTTOM")
         GameTooltip:AddLine(TITLE())
         if FOREVER() then
             GameTooltip:AddLine("Other players online running each Void addon, counted from its sharing channel. Updates every 10 minutes. (WoW Forever can't count by zone.)", 0.8, 0.8, 0.8, true)

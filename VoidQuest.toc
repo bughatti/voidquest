@@ -2,10 +2,11 @@
 ## Title: |cff00c7ffVoidQuest|r
 ## Notes: Quest guide that reads the game live: your campaign, your zone and the quest nearest to you (retail and WoW Forever)
 ## Author: Vede
-## Version: 0.3.25
+## Version: 0.3.26
 ## SavedVariables: VoidQuestDB, VoidPresenceDB
 ## SavedVariablesPerCharacter: VoidQuestCharDB, VoidHubCharDB
 
+VoidMove.lua
 Core.lua
 Settings.lua
 QuestSeed.lua [ExcludeLoadGameType camelot]
@@ -42,5 +43,11 @@ MinimapHover.lua
 QuestMobs.lua
 ForeverZone.lua
 ForeverZone.xml
+EscortWatch.lua
+GroupUp.lua
+QuestTime.lua
+ForeverAreas.lua
+Explore.lua
+RoutePlan.lua
 QuestBook.lua
 VoidHubBundle.lua
