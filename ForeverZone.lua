@@ -44,6 +44,165 @@ function F:Info(id)
     }
 end
 
+----------------------------------------------------------------------
+-- Rewards: which items you choose from and which you get anyway
+----------------------------------------------------------------------
+-- Field 10 forms: "A" · "A, B" (you get both) · "choose: A / B" · "A, B; choose: C / D" ·
+-- "unsplit: A / B / C" (filled from NorgannonDB: the items, NOT which are a choice; guessing put
+-- Vorrel's Boots in Vorrel's Revenge's choice, it's given on top). Names follow field 11's IDs.
+-- What the game says wins: a quest in your log, else the split saved when a quest giver showed
+-- the quest (VoidQuestDB.rewardSplit, "g:1,2|c:3,4"), else the data.
+
+-- data text + IDs -> { given = {ids}, choice = {ids}, known = bool, names = {[id] = name} }
+function F:ParseRewards(text, idText)
+    local ids = {}
+    for tok in (idText or ""):gmatch("%d+") do ids[#ids + 1] = tonumber(tok) end
+    text = type(text) == "string" and text or ""
+    local names, given, choice, known = {}, {}, {}, true
+    local list, nGiven = {}, nil
+    local u = text:match("^unsplit:%s*(.*)$")
+    if u then
+        known = false
+        for n in (u .. " / "):gmatch("(.-) / ") do if n ~= "" then list[#list + 1] = n end end
+    else
+        local g, c = text:match("^(.-);?%s*choose:%s*(.*)$")
+        if not g then g, c = text, "" end
+        for n in (g .. ", "):gmatch("(.-), ") do if n ~= "" then list[#list + 1] = n end end
+        nGiven = #list
+        for n in (c .. " / "):gmatch("(.-) / ") do if n ~= "" then list[#list + 1] = n end end
+    end
+    local paired = #list == #ids
+    for i, id in ipairs(ids) do
+        if paired then names[id] = list[i] end
+        if known and nGiven and i > nGiven then choice[#choice + 1] = id else given[#given + 1] = id end
+    end
+    if not known then given = ids end
+    return { given = given, choice = choice, known = known and #ids > 0, names = names, list = list }
+end
+
+-- pcall that keeps every return (safe() keeps 3; the itemID is the 6th)
+local function call(fn, ...)
+    if not fn then return nil end
+    local t = { pcall(fn, ...) }
+    if t[1] then return unpack(t, 2, 9) end
+end
+-- Get*Info returns name, texture, count, quality, usable, itemID
+local function idFrom(...)
+    local id = select(6, ...)
+    return type(id) == "number" and id > 0 and id or nil
+end
+local function idFromLink(link) return type(link) == "string" and tonumber(link:match("item:(%d+)")) or nil end
+
+-- the split the game shows: "log" = this quest in your log, "giver" = the quest giver's window
+local function readSplit(where, qid)
+    local given, choice = {}, {}
+    local function add(list, info, link)
+        local id = idFrom(info()) or idFromLink(link())
+        if not id then return false end
+        list[#list + 1] = id
+        return true
+    end
+    if where == "log" then
+        for i = 1, safe(GetNumQuestLogRewards, qid) or 0 do
+            if not add(given, function() return call(GetQuestLogRewardInfo, i, qid) end,
+                function() return call(GetQuestLogItemLink, "reward", i, qid) end) then return nil end
+        end
+        for i = 1, safe(GetNumQuestLogChoices, qid) or 0 do
+            if not add(choice, function() return call(GetQuestLogChoiceInfo, i, qid) end,
+                function() return call(GetQuestLogItemLink, "choice", i, qid) end) then return nil end
+        end
+    else
+        for i = 1, safe(GetNumQuestRewards) or 0 do
+            if not add(given, function() return call(GetQuestItemInfo, "reward", i) end,
+                function() return call(GetQuestItemLink, "reward", i) end) then return nil end
+        end
+        for i = 1, safe(GetNumQuestChoices) or 0 do
+            if not add(choice, function() return call(GetQuestItemInfo, "choice", i) end,
+                function() return call(GetQuestItemLink, "choice", i) end) then return nil end
+        end
+    end
+    if #given + #choice == 0 then return nil end   -- not loaded yet, or no items: keep what we had
+    -- a single "choice" is handed to you (the game picks it)
+    if #choice == 1 then given[#given + 1] = choice[1]; choice = {} end
+    return given, choice
+end
+
+local function save(qid, given, choice)
+    if not (qid and given) or type(VoidQuestDB) ~= "table" then return end
+    VoidQuestDB.rewardSplit = VoidQuestDB.rewardSplit or {}
+    VoidQuestDB.rewardSplit[qid] = "g:" .. table.concat(given, ",") .. "|c:" .. table.concat(choice, ",")
+end
+
+local function learned(qid)
+    local s = type(VoidQuestDB) == "table" and VoidQuestDB.rewardSplit and VoidQuestDB.rewardSplit[qid]
+    if type(s) ~= "string" then return nil end
+    local g, c = s:match("^g:([%d,]*)|c:([%d,]*)$")
+    if not g then return nil end
+    local given, choice = {}, {}
+    for t in g:gmatch("%d+") do given[#given + 1] = tonumber(t) end
+    for t in c:gmatch("%d+") do choice[#choice + 1] = tonumber(t) end
+    return given, choice
+end
+
+-- the best split known for a quest: { given, choice, known, names, source = "log"/"giver"/"data" }
+function F:RewardSplit(qid)
+    local r = VQ.ForeverQuests and VQ.ForeverQuests[qid]
+    local data = self:ParseRewards(r and r[10], r and r[11])
+    local given, choice, source
+    if safe(C_QuestLog.GetLogIndexForQuestID, qid) then
+        given, choice = readSplit("log", qid)
+        if given then save(qid, given, choice); source = "log" end
+    end
+    if not given then
+        given, choice = learned(qid)
+        if given then source = "giver" end
+    end
+    if not given then data.source = "data"; return data end
+    return { given = given, choice = choice, known = true, names = data.names, source = source }
+end
+
+-- "Sword of Omen" · "A, B" · "pick one: A / B" · "A, and pick one: B / C" ·
+-- "A / B / C (not known yet which are a choice)"; nil when the quest gives no items
+function F:RewardText(qid)
+    local s = self:RewardSplit(qid)
+    local function name(id) return s.names[id] or safe(C_Item.GetItemNameByID, id) or ("item " .. id) end
+    local function join(list, sep)
+        local t = {}
+        for _, id in ipairs(list) do t[#t + 1] = name(id) end
+        return table.concat(t, sep)
+    end
+    if #s.given + #s.choice == 0 then return nil end
+    if not s.known then
+        -- one name left = the others are unknown items, so it may be one choice of several
+        if #s.given == 1 then return name(s.given[1]) .. " (and rewards not known yet)" end
+        return join(s.given, " / ") .. " (not known yet which are a choice)"
+    end
+    if #s.choice == 0 then return join(s.given, ", ") end
+    if #s.given == 0 then return "pick one: " .. join(s.choice, " / ") end
+    return join(s.given, ", ") .. ", and pick one: " .. join(s.choice, " / ")
+end
+
+-- true = you pick one of several, false = you don't, nil = not known
+function F:RewardPickOne(qid)
+    local s = self:RewardSplit(qid)
+    if not s.known then return nil end
+    return #s.choice > 1
+end
+
+-- learn the split whenever a quest giver shows a quest's rewards (offer or turn-in)
+do
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("QUEST_DETAIL")
+    ev:RegisterEvent("QUEST_COMPLETE")
+    ev:SetScript("OnEvent", function()
+        if not F:Active() then return end
+        local qid = safe(GetQuestID)
+        if not (qid and qid > 0) then return end
+        local given, choice = readSplit("giver", qid)
+        if given then save(qid, given, choice) end
+    end)
+end
+
 local me   -- player faction letter, class token, race name
 local function Me()
     if me then return me end
@@ -341,8 +500,7 @@ local function RewardIndex()
     if rewardIndex then return rewardIndex end
     rewardIndex = {}
     for id, r in pairs(VQ.ForeverQuests or {}) do
-        local s = type(r[10]) == "string" and r[10]:gsub("^choose:%s*", "") or ""
-        for name in (s .. ","):gsub("%s*/%s*", ","):gmatch("%s*([^,]-)%s*,") do
+        for _, name in ipairs(F:ParseRewards(r[10], r[11]).list) do
             if name ~= "" then
                 local k = name:lower()
                 local t = rewardIndex[k]

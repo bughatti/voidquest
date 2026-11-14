@@ -198,19 +198,12 @@ function B.ItemMatches(id, terms, name)
     return AllIn(text, terms)
 end
 
--- The quest data lists reward names in the same order as their item IDs ("A, B" or "choose: A / B");
--- pair them when the counts agree
+-- The quest data lists reward names in the same order as their item IDs ("A, B", "choose: A / B",
+-- "A; choose: B / C" or "unsplit: A / B"); paired by ForeverZone's parser when the counts agree
 local function RewardNames(text, ids)
-    local list = {}
-    for tok in ids:gmatch("%d+") do list[#list + 1] = tonumber(tok) end
-    if #list == 0 or text == "" then return nil end
-    local s = text:gsub("^choose:%s*", ""):gsub(" / ", "\1"):gsub(", ", "\1")
-    local names = {}
-    for n in (s .. "\1"):gmatch("([^\1]*)\1") do names[#names + 1] = n end
-    if #names ~= #list then return nil end
-    local out = {}
-    for i, id in ipairs(list) do out[id] = names[i] end
-    return out
+    if not (VQ.Forever and VQ.Forever.ParseRewards) or text == "" then return nil end
+    local p = VQ.Forever:ParseRewards(text, ids)
+    return next(p.names) and p.names or nil
 end
 
 local function Build()
@@ -228,7 +221,7 @@ local function Build()
                 xp = r[4] or 0, bag = F.BagOf and F:BagOf(r) or nil }
             e.tz = Norm(e.title .. " " .. zone)                 -- quest name + zone: always searchable
             e.names = RewardNames(e.rewards, e.ids)
-            e.search = Norm(e.title .. " " .. zone .. " " .. e.rewards)
+            e.search = Norm(e.title .. " " .. zone .. " " .. e.rewards:gsub("^unsplit:", ""))
             all[#all + 1] = e; byId[id] = e
             local z = byZone[zone]
             if not z then z = {}; byZone[zone] = z end
@@ -532,7 +525,10 @@ local function FillRow(row, e)
     row.title:SetText(color .. lv .. e.title .. "|r" .. bag)
     local bits = { e.zone, ready and "|cffffd200ready to turn in|r" or STATUS_TEXT[st] }
     if e.low then bits[#bits + 1] = "|cff888888low level|r" end
-    if e.rewards:find("^choose:") then bits[#bits + 1] = "pick one reward" end
+    -- "pick one" only when the game (your log, or a quest giver seen before) or the data says so;
+    -- a NorgannonDB fill doesn't tell (ForeverZone F:RewardSplit)
+    local pick = VQ.Forever and VQ.Forever.RewardPickOne and VQ.Forever:RewardPickOne(e.id)
+    if pick then bits[#bits + 1] = "pick one reward" end
     row.sub:SetText(table.concat(bits, "  ·  "))
     -- reward icons, bags first: a "pick one" quest can have 7+ rewards and the bag was cut off
     -- and when searching, the rewards that match come first ("off hand": the dagger, not the boots)

@@ -627,7 +627,8 @@ local function ShowBox()
         -- repeatable showed no box at all)
         local f = r[6] or ""
         local kind = f:find("d") and "Daily. " or f:find("w") and "Weekly. " or f:find("r") and "Repeatable. " or ""
-        local rew = (r[10] and r[10] ~= "") and (" (" .. r[10] .. ")") or ""
+        local rt = VQ.Forever and VQ.Forever.RewardText and VQ.Forever:RewardText(qid)
+        local rew = rt and (" (" .. rt .. ")") or ""
         -- it may give capital reputation you're already Honored with: that buys nothing more
         local rep = (r[12] and r[12]:find("%d+:%d")) and "no reputation that gets you anything more" or "no reputation"
         lines = { ("|cffaaaaaa%sNo follow-up quest and %s: only its own reward%s.|r"):format(kind, rep, rew) }

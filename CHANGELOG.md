@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.28 — 2026-11-13
+
+- **WoW Forever: quest rewards that were missing are back, 213 quests in all, mostly dungeon quests.** Blizzard's Forever data leaves out the item rewards of many Classic quests, so "Into The Scarlet Monastery" showed no Sword of Omen. The Quest Book now shows those rewards with item tooltips, and searching for an item finds the quest: type "sword of omen".
+- **"Pick one" only when it's known.** For the filled-in quests the data doesn't say which items you choose from and which you get anyway. VoidQuest reads that from the game: right away for quests in your log, and for any other quest once a quest giver has shown it to you (it's remembered). Until then the items are listed with "not known yet which are a choice", never a guess.
+
 ## 0.3.27 — 2026-11-12
 
 - **Fixed: a side of a box could be missing**, e.g. the right line of the recipes box and its buttons when the game window is an odd number of pixels wide. Every Void box now always shows all four border lines.
