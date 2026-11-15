@@ -624,9 +624,11 @@ local function Mark(unit)
             icon:SetPoint("BOTTOM", plate, "TOP", 0, -6)
             plate.voidQuestMark = icon
         end
-        icon:SetTexture(quests and "Interface\\GossipFrame\\AvailableQuestIcon" or "Interface\\GossipFrame\\DailyQuestIcon")
-        icon:SetVertexColor(1, 1, 1, 1)
-        if not quests then icon:SetVertexColor(0.8, 0.8, 1, 1) end   -- a rare (not for a quest): silver-blue
+        -- A sword (the game's attack cursor), never the quest-giver "!": the user, 2026-11-14:
+        -- "i am confusing them with quest acceptance npcs". Gold = counts for your quest,
+        -- pale blue = a rare that isn't.
+        icon:SetTexture("Interface\\Cursor\\Attack")
+        if quests then icon:SetVertexColor(1, 0.85, 0.2, 1) else icon:SetVertexColor(0.6, 0.8, 1, 1) end
         icon:Show()
         inView[unit] = { name = name or "?", quests = quests, rare = rare }
         local npc = NpcID(unit)

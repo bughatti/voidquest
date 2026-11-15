@@ -85,7 +85,8 @@ _G.VoidHubToggles = _G.VoidHubToggles or {}
 do
     -- 3: VoidSequencer, VoidPlates, VoidFrames and VoidCheatSheet listed on WoW Forever again (2 hid
     -- them as Midnight-only; all four work there; the user, 2026-11-11: "seq is not in the new hud")
-    local QUICK_VERSION = 3
+    -- 4: VoidDungeon listed (dungeon journal + marking board; it had no hub entry, the user 2026-11-14)
+    local QUICK_VERSION = 4
     if (_G.__VoidQuickVersion or 0) < QUICK_VERSION then
         _G.__VoidQuickVersion = QUICK_VERSION
         local Q = {}
@@ -98,6 +99,7 @@ do
         local GROUPS = { "Questing and travel", "Gear and gold", "Professions", "Combat", "PvP and groups", "Other" }
         local ADDONS = {
             { "VoidQuest", "Quests", 1 }, { "VoidGPS", "GPS", 1 }, { "VoidMap", "World map", 1 },
+            { "VoidDungeon", "Dungeons", 1 },
             { "VoidLayer", "Layers", 1 }, { "VoidSweep", "Map radar", 1 },
             { "VoidGear", "Gear", 2 }, { "VoidBags", "Bags", 2 }, { "VoidAH", "Auction House", 2 },
             { "VoidProf", "Professions", 3 }, { "VoidGather", "Gathering", 3 }, { "VoidFisher", "Fishing", 3 },
@@ -520,6 +522,7 @@ local KNOWN_VOID_ADDONS = {
     { name = "VoidBounty",     label = "Bounties",          desc = "WoW Forever world PvP: enemy players nearby, the players who killed you, and writs paid in vendor goods." },
     { name = "VoidCalendar",   label = "Calendar",         public = true, desc = "A Void-themed calendar replacement that shows every event in your own time zone." },
     { name = "VoidCheatSheet", label = "Cheat Sheets",      public = true, desc = "In-game cheat sheets for every Midnight raid, the full Mythic+ pool, and delve bosses, auto-pops on pull." },
+    { name = "VoidDungeon",    label = "Dungeons",          public = true, desc = "WoW Forever dungeon journal inside VoidMap: maps, quests, boss loot, soft reserve, BoE handout and the marking board." },
     { name = "VoidComp",       label = "Comp Tool",         desc = "Group composition planning and balance helper." },
     { name = "VoidDice",       label = "Dice Roller",       desc = "Standardized loot-roll rolls for raids." },
     { name = "VoidFisher",     label = "Fishing",           desc = "Fishing tracker: catches, their value and the best spots." },

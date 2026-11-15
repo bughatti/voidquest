@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.29 — 2026-11-14
+
+- **Quest mobs get a sword, not a "!".** The yellow "!" over mobs you need for a quest looked just like a quest giver's. It's now a gold sword (a pale blue one over rares), so a "!" always means someone to talk to.
+- **Group quest progress in a mob's tooltip, tidied up.** In a group the game lists every quest, then every player, then each player's count, one per line (four quests in a group of four was over 30 lines). Now each objective is one line with everyone on it: "Bloodscalp Ear /15: You 7 · Elementrix 10 · Poptimus 8 · Mokiya 9", names in class colors. Quests you still need come first, then ones a groupmate needs, and finished quests shrink to one line ("Hunt for Yenniku: everyone done"). Solo tooltips stay as they were.
+
 ## 0.3.28 — 2026-11-13
 
 - **WoW Forever: quest rewards that were missing are back, 213 quests in all, mostly dungeon quests.** Blizzard's Forever data leaves out the item rewards of many Classic quests, so "Into The Scarlet Monastery" showed no Sword of Omen. The Quest Book now shows those rewards with item tooltips, and searching for an item finds the quest: type "sword of omen".
