@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.32 — 2026-11-15
+
+- **Credits:** the game data this addon ships is now called **VoidDB**; full credits and licences of the open data in it are in NOTICE.txt and the README.
+
 ## 0.3.31 — 2026-11-15
 
 - **WoW Forever: sharing works like a torrent now.** Quest givers, quest-mob spots and quest facts used to go to a few random players once and stop. Now every Void player compares what they know with one random player every few minutes and only what differs moves, so a find reaches everyone and players who log in later still get it, with the same small traffic at 50 or 5,000 players. VoidDungeon's mob marks and VoidSweep's rare spots, kill times and respawn times share the same network (one channel for all of them).
@@ -93,7 +97,7 @@ Tested on WoW Forever (retail not re-tested).
   - **Only what I can use** (on by default): leaves out rewards your class can't wear or wield.
   - **Reward icons on every line**: hover for the item, shift-click to link, ctrl-click to try it on. Click the quest for the way to its giver.
   - **Summary**: your progress overall and per continent, and the quests you can do now closest to your level.
-- **Only your faction's quests**: Blizzard's quest data leaves the faction blank on most Forever quests, so Horde players saw Ironforge and Darnassus quests (and Alliance players Orgrimmar ones). VoidQuest now knows each quest's side (from NorgannonDB), everywhere: the Quest Book, the zone list, the map's "!" and the quest box. Hidden test quests are gone too.
+- **Only your faction's quests**: Blizzard's quest data leaves the faction blank on most Forever quests, so Horde players saw Ironforge and Darnassus quests (and Alliance players Orgrimmar ones). VoidQuest now knows each quest's side (from VoidDB), everywhere: the Quest Book, the zone list, the map's "!" and the quest box. Hidden test quests are gone too.
 - **Bags**: every quest that gives a bag, with its size ("12-slot bag", "8-slot quiver"), and the bags you can buy, normal and reagent bags (herb, mining, skinning), with price, the nearest vendor and the way there. Quest tooltips now say a bag's size.
 
 ### WoW Forever
@@ -191,10 +195,10 @@ Tested on WoW Forever (retail not re-tested).
 
 ## 0.3.0 (beta)
 
-- **WoW Forever: thousands of quest givers, turn-ins and quest chains out of the box.** VoidQuest now ships data from NorgannonDB (about 4,500 quest givers with their spots, turn-in NPCs, and 3,600 chain links), instead of only the givers players had found so far (176). The map's "!" markers, the zone list and the grey quest keep / drop marks all use it. Your own finds still win where they differ.
+- **WoW Forever: thousands of quest givers, turn-ins and quest chains out of the box.** VoidQuest now ships data from VoidDB (about 4,500 quest givers with their spots, turn-in NPCs, and 3,600 chain links), instead of only the givers players had found so far (176). The map's "!" markers, the zone list and the grey quest keep / drop marks all use it. Your own finds still win where they differ.
 - **Grey quests are graded on real chains**, so a grey quest that leads to a good reward or a dungeon quest is marked keep.
 - **Lighter sharing.** VoidQuest only shares quest givers the shipped data doesn't already have.
-- **Licence: VoidQuest is now GPL-3.0** (was MIT), because it includes NorgannonDB's data. See Credits in the README.
+- **Licence: VoidQuest is now GPL-3.0** (was MIT), because VoidDB's data includes GPL-3.0 open data. See Credits in the README.
 
 ## 0.2.6 (beta)
 

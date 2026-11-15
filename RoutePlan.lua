@@ -225,7 +225,7 @@ end
 -- them, so the giver is assumed and the plan says "probably".
 local function turninSpot(qid)
     local who = VQ.Starts and VQ.Starts:Turnin(qid)
-    -- where it's really handed in: your own turn-in, else NorgannonDB's finisher (objects too)
+    -- where it's really handed in: your own turn-in, else VoidDB's finisher (objects too)
     local ts = VQ.Starts and VQ.Starts.TurninSpot and VQ.Starts:TurninSpot(qid)
     if ts then return { map = ts.m, x = ts.x, y = ts.y }, who end
     local s = npcSpot(who)
@@ -303,7 +303,7 @@ end
 
 -- -> plan = { steps = { stop... }, sec, travel, work, xp, quests, skipped = { group, grey, unknown } }
 -- The next quests after one: quests whose earlier-quest rule names it (ForeverRules pa / py) and
--- confirmed chain links (Chains.lua, NorgannonDB + learned live).
+-- confirmed chain links (Chains.lua, VoidDB + learned live).
 local rulesNext, rulesFrom
 local function followersOf(x)
     if not rulesNext or rulesFrom ~= VQ.ForeverRules then   -- built once per rule table

@@ -48,7 +48,7 @@ end
 -- Rewards: which items you choose from and which you get anyway
 ----------------------------------------------------------------------
 -- Field 10 forms: "A" · "A, B" (you get both) · "choose: A / B" · "A, B; choose: C / D" ·
--- "unsplit: A / B / C" (filled from NorgannonDB: the items, NOT which are a choice; guessing put
+-- "unsplit: A / B / C" (filled from VoidDB: the items, NOT which are a choice; guessing put
 -- Vorrel's Boots in Vorrel's Revenge's choice, it's given on top). Names follow field 11's IDs.
 -- What the game says wins: a quest in your log, else the split saved when a quest giver showed
 -- the quest (VoidQuestDB.rewardSplit, "g:1,2|c:3,4"), else the data.
@@ -234,7 +234,7 @@ end
 function F:Eligible(r)
     local m = Me()
     -- Blizzard leaves the faction blank on most Forever quests (the user, 2026-11-10, Horde: "i am seeing
-    -- quests for ironforge"); NorgannonDB's races fill it in (ForeverFaction.lua), and "X" = hidden
+    -- quests for ironforge"); VoidDB's races fill it in (ForeverFaction.lua), and "X" = hidden
     -- developer quests, for no one
     local fac = r[3]
     if fac == "" and VQ.ForeverFaction then
@@ -327,7 +327,7 @@ local function lowLevelHidden(id)
 end
 
 ----------------------------------------------------------------------
--- What a quest needs before its giver offers it (ForeverRules.lua, from NorgannonDB:
+-- What a quest needs before its giver offers it (ForeverRules.lua, from VoidDB:
 -- tools/cmd/vq-rules). The user, 2026-11-11: a "!" for the third "The Swarm Grows" at a
 -- giver who only offers it after the first two; "we need to fix anything like this through
 -- all the quests". F:Rule(id) -> kind, reason:
@@ -602,7 +602,7 @@ function F:Available(id)
     local b = not self.assumeDone and VoidQuestCharDB and VoidQuestCharDB.blocked and VoidQuestCharDB.blocked[id]
     if b and lvl <= b then return false, "Not offered to you yet (level or an earlier quest first)" end
     -- a known earlier quest you haven't turned in: no "!" yet, and say which one
-    -- what NorgannonDB says the quest needs (F:Rule); only quests it has nothing on fall back to
+    -- what VoidDB says the quest needs (F:Rule); only quests it has nothing on fall back to
     -- the earlier quest of a known chain link
     local kind, why, first = self:Rule(id)
     if kind then return false, why, first end

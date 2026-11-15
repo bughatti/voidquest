@@ -222,7 +222,7 @@ local function shareable(s)
         and s.x > 0 and s.x < 1 and s.y > 0 and s.y < 1
 end
 
--- Every player already has the shipped seed (VoidQuest.ForeverSeed, NorgannonDB-backed since
+-- Every player already has the shipped seed (VoidQuest.ForeverSeed, VoidDB-backed since
 -- 0.3.0): a find it already holds isn't sent. Addon messages are small and throttled, so only
 -- gaps and real corrections (the giver somewhere else) go out (the user, 2026-11-06).
 local function seedHas(q, s)
@@ -698,7 +698,7 @@ end
 -- the minimap for a dot and of course over time after 3 or 4 people find it at the same spot
 -- its now concrete"). Addons get no mob positions, but a quest mob's nameplate means it's near
 -- you, and QuestMobs.lua records where you stood (VoidQuestDB.seenMobs). New spots the shipped
--- data (NorgannonDB, ForeverSpawns) doesn't have go out like givers, held back the same way
+-- data (VoidDB, ForeverSpawns) doesn't have go out like givers, held back the same way
 -- (PRIVACY: 10-20 min, or once you've left the map):
 --   M:1:mapID:npc,x,y,q;...   x/y = 0..999 (0.1% of the map), q = the quest it counted for, or 0
 -- ~16-22 bytes an entry, up to FLUSH_MAX entries a tick to FANOUT members. A heard spot is used

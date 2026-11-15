@@ -11,7 +11,7 @@
 -- (Before, 2026-11-06: "id rather not have a bunch of dots all over the map" -- that was
 -- every drop spot for everything; one quest's objectives is what's wanted.)
 --
--- Data: ForeverMobs.lua (tools/cmd/forever-mobs, from NorgannonDB, which reads WoW
+-- Data: ForeverMobs.lua (tools/cmd/forever-mobs, from VoidDB, which reads WoW
 -- Forever's own tables). /vq dots turns them off.
 ----------------------------------------------------------------------
 local _, ns = ...   -- the addon's own table: MinimapHover.lua lives there
@@ -150,7 +150,7 @@ function M:AddQuestDots(out, qid, mapID)
         local name = VQ.ForeverMobNames and VQ.ForeverMobNames[key]
         local o = ObjectiveFor(objs, kind == "d" and ItemName(item) or name)
         if not (o and o.finished) then
-            -- NorgannonDB's spots + the spots you've SEEN this mob at (its nameplate came up)
+            -- VoidDB's spots + the spots you've SEEN this mob at (its nameplate came up)
             local npc = tonumber(key:match("^n(%d+)$"))
             local learned = npc and seen[npc] and seen[npc].m and seen[npc].m[mapID] or ""
             -- + spots 3+ other players saw it at (ForeverShare)
@@ -387,7 +387,7 @@ end
 -- game's own tooltip data says whether it counts for YOUR unfinished objectives. So:
 --   1. a quest icon over each such mob's nameplate (rares get one too)
 --   2. where you saw it is learned (VoidQuestDB.seenMobs), so the minimap markers point at
---      where mobs really are on Forever, not only where NorgannonDB says
+--      where mobs really are on Forever, not only where VoidDB says
 ----------------------------------------------------------------------
 local LT = Enum and Enum.TooltipDataLineType or {}
 local L_OBJ, L_TITLE, L_PLAYER = LT.QuestObjective or 8, LT.QuestTitle or 17, LT.QuestPlayer or 18

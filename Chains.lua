@@ -269,7 +269,7 @@ C.NextOf = NextOf
 
 -- The quest that has to be done before this one, when you haven't done it (the user, 11-11: a "!" for the
 -- third "The Swarm Grows" at Moktar Krin, who only offers it after the first two). Confirmed links only
--- (the seed's are NorgannonDB prerequisites + chains, and links seen live). Any one earlier quest
+-- (the seed's are VoidDB prerequisites + chains, and links seen live). Any one earlier quest
 -- turned in is enough (quests with several ways in). Returns the earlier quest id, or nil.
 function C:Earlier(qid)
     Fresh()

@@ -44,7 +44,7 @@ local PORTALS = {
     { map = 84,   x = 43.6,  y = 87.2,  toMap = 103,  faction = "Alliance", name = "portal to the Exodar",      zone = "Stormwind City" },
 }
 
--- WoW Forever: no portals, the Horde zeppelins (tower spots from VoidGPS's Places.lua, NorgannonDB).
+-- WoW Forever: no portals, the Horde zeppelins (tower spots from VoidGPS's Places.lua, VoidDB).
 -- Boats aren't listed: when no way is known, VoidGPS (if installed) routes it, and it learns
 -- every boat you ride. Forever audit 2026-11-09: pins to another continent had no way at all.
 if (select(4, GetBuildInfo()) or 0) < 100000 then

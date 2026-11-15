@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- VoidQuest — EscortWatch: what players actually see at escort quests (WoW Forever)
 --
--- The escort list (ForeverEscort in ForeverRules.lua) is read from NorgannonDB's wording, and
+-- The escort list (ForeverEscort in ForeverRules.lua) is read from VoidDB's wording, and
 -- "back in a few minutes" is a guess. The user, 2026-11-11: "we also need to collect that data
 -- from people actually doing the quests to validate". So every VoidQuest player records:
 --   start  a group member started it and the game asked you to join (QUEST_ACCEPT_CONFIRM:

@@ -526,7 +526,7 @@ local function FillRow(row, e)
     local bits = { e.zone, ready and "|cffffd200ready to turn in|r" or STATUS_TEXT[st] }
     if e.low then bits[#bits + 1] = "|cff888888low level|r" end
     -- "pick one" only when the game (your log, or a quest giver seen before) or the data says so;
-    -- a NorgannonDB fill doesn't tell (ForeverZone F:RewardSplit)
+    -- a VoidDB fill doesn't tell (ForeverZone F:RewardSplit)
     local pick = VQ.Forever and VQ.Forever.RewardPickOne and VQ.Forever:RewardPickOne(e.id)
     if pick then bits[#bits + 1] = "pick one reward" end
     row.sub:SetText(table.concat(bits, "  ·  "))
