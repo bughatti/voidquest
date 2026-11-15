@@ -24,7 +24,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **The way there** (with **VoidGPS**) — for a quest in another zone, the tooltip lists the steps to its next stop: "1. Fly to Orgrimmar (from Camp Taurajo) 2. Take the zeppelin outside Orgrimmar to Grom'gol 3. Walk 832 yd to Hemet Nesingwary". **Shift-click** the quest and VoidGPS guides you there.
 - **Coloured by level** — quest lines use the quest log's colours: gray (far below you), green, yellow (your level), orange, red (too high for now).
 - **Quest levels in front of the name** — "[30] Horde Presence", with **[30D]** for a dungeon quest, **[30R]** raid and **[30+]** elite (WoW Forever). Turn it off in settings.
-- **Who in your group is on it** — a small blue badge at the right of a line counts the group members on that quest too; hover for their names.
+- **Who in your group is on it** — a small blue badge at the right of a line counts the group members on that quest too; hover for their names. A green **S** next to it shares the quest with whoever in your group doesn't have it (Alt-click the line does the same). The quest you're on, at the top, has them too.
 - **Quest items, one click** — when a quest needs you to use an item ("fire the flare gun", "use the totem"), its button sits beside the panel while you're near that quest, closest quest on top, and goes away when you leave. On WoW Forever most quests never tell the game which item is theirs, so VoidQuest works it out: the item a quest hands you when you accept it, else an item the quest's text names. `/vq items` shows what it found.
 - **In a dungeon, its quests first** — inside a dungeon or raid the lines list that dungeon's quests; your outdoor quests wait under "+N more".
 

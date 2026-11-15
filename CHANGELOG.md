@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.30 — 2026-11-14
+
+- **The quest you're on gets the same badges as the lines below it:** how many in your group are on it, how many VoidQuest players here are on it, and the **S** to share it with whoever doesn't have it. Alt-click it to share, and its tooltip lists who in your group has it.
+
 ## 0.3.29 — 2026-11-14
 
 - **Quest mobs get a sword, not a "!".** The yellow "!" over mobs you need for a quest looked just like a quest giver's. It's now a gold sword (a pale blue one over rares), so a "!" always means someone to talk to.

@@ -2754,6 +2754,8 @@ function mod:EnsurePanel()
         if IsShiftKeyDown() and mod:GuideToQuest(mod._stepQid) then return end
         -- ctrl: ask VoidQuest players on this quest to group (GroupUp.lua, WoW Forever)
         if IsControlKeyDown() and VQ.GroupUp and mod._stepQid then VQ.GroupUp:Ask(mod._stepQid); return end
+        -- alt: offer it to your group, like the lines below
+        if IsAltKeyDown() and mod._stepQid and mod.ShareQuest then mod.ShareQuest(mod._stepQid); return end
         mod:TakeTrack(); mod._sidePin = nil
         -- lock the arrow to THIS quest until it's turned in / dropped (see Waypoint, Resolve)
         mod._pinLock = mod._stepQid and { qid = mod._stepQid, step = mod._shownStep } or nil
@@ -2780,6 +2782,14 @@ function mod:EnsurePanel()
     f.stepBtn:SetScript("OnClick", pinClick)
     f.stepBtn:SetScript("OnEnter", pinEnter)
     f.stepBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- the step's quest gets the same badges as the lines below (group count, players here,
+    -- "S" share), at the right end of its first line (the user, 2026-11-14: "the top quest ...
+    -- doesnt have the same options as all the ones below it"). Made after stepBtn: on top, so
+    -- the "S" takes its own clicks.
+    f.stepBadges = CreateFrame("Frame", nil, f)
+    f.stepBadges:SetSize(1, 14)
+    f.stepBadges.w = 0
+    f.stepBadges:Hide()
     f.objBtn = CreateFrame("Button", nil, f)
     f.objBtn:SetAllPoints(f.obj)
     f.objBtn:SetScript("OnClick", pinClick)
@@ -3571,6 +3581,7 @@ end
 -- short of the badge so they never overlap. shareQid: the line's quest, for its "S" (right
 -- of the badge, at the end of the line).
 local function SetLineParty(holder, fs, n, shareQid)
+    local w = 0   -- how wide the badges are, gaps included (the step line makes room for them)
     if not holder.partyBg then
         local bg = holder:CreateTexture(nil, "ARTWORK")
         bg:SetColorTexture(0.05, 0.32, 0.85, 1)
@@ -3588,6 +3599,7 @@ local function SetLineParty(holder, fs, n, shareQid)
         s.qid, s.missing = shareQid, missing
         s:ClearAllPoints(); s:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
         s:Show()
+        w = w + (s:GetWidth() or 11) + 3
         edge, gap = s, -3
     elseif holder.shareS then
         holder.shareS:Hide(); holder.shareS.qid = nil
@@ -3595,12 +3607,15 @@ local function SetLineParty(holder, fs, n, shareQid)
     local bg = holder.partyBg
     bg:ClearAllPoints()
     bg:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", gap, 0)
-    fs:ClearAllPoints()
-    fs:SetPoint("TOPLEFT", holder, "TOPLEFT"); fs:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT")
+    if fs then   -- nil: the caller places its own text (the step line)
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", holder, "TOPLEFT"); fs:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT")
+    end
     if n and n > 0 then
         holder.party:SetText(tostring(n))
         bg:SetWidth(math.max(11, (holder.party:GetStringWidth() or 6) + 6))
         bg:Show(); holder.party:Show()
+        w = w + bg:GetWidth() + 3
         edge, gap = bg, -3
     else
         holder.party:SetText(""); holder.party:Hide(); bg:Hide()
@@ -3625,11 +3640,13 @@ local function SetLineParty(holder, fs, n, shareQid)
         hb:ClearAllPoints()
         hb:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", gap, 0)
         hb:Show(); holder.here:Show()
+        w = w + hb:GetWidth() + 3
         edge, gap = hb, -3
     elseif holder.hereBg then
         holder.hereBg:Hide(); holder.here:Hide()
     end
-    fs:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", edge == holder and 0 or -4, 0)
+    if fs then fs:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", edge == holder and 0 or -4, 0) end
+    return w
 end
 local function SetRowParty(row, n, qid) SetLineParty(row, row.text, n, qid) end
 
@@ -3738,7 +3755,26 @@ end
 -- (the user, 2026-11-09: "if i hover over it it doesnt show the details like all the ones
 -- below it"). The panel is built above this point in the file, so it calls in through mod.
 function mod:StepTooltip(s, qid)
-    QuestTipWithGroup(qid, nil, nil, "Click: set a map pin for this step")(s)
+    local _, groupNames = GroupOnQuest(qid)
+    QuestTipWithGroup(qid, nil, groupNames, "Click: set a map pin for this step")(s)
+end
+
+-- The step line's badges: the same as a quest line's (SetLineParty), at the right end of its
+-- first line; the step text stops short of them. nil qid = none.
+function mod:StepBadges(f, qid)
+    local h = f.stepBadges
+    if not h then return end
+    h:ClearAllPoints(); h:SetPoint("TOPRIGHT", f.step, "TOPLEFT", CW(), 0)
+    local w = 0
+    if qid then
+        local n = GroupOnQuest(qid)
+        w = SetLineParty(h, nil, n, qid) or 0
+    else
+        SetLineParty(h, nil, 0, nil)
+    end
+    h.w = w
+    h:SetShown(w > 0)
+    f.step:SetWidth(CW() - (w > 0 and (w + 4) or 0))
 end
 
 -- The "Way there" line under the guided step (render code below calls this)
@@ -3976,6 +4012,7 @@ function mod:RenderQuestList(f, popH)
     popH = popH or 0
     if f.pbar then f.pbar:Hide() end   -- list mode: bars are per row
     f.chapter:Hide(); f.step:Hide(); f.obj:Hide()
+    if f.stepBadges then f.stepBadges:Hide() end
     f.tabZones:Hide(); f.tabDungeons:Hide(); self._tabMode = nil
     if f.stepBtn then f.stepBtn:Hide() end
     if f.objBtn then f.objBtn:Hide() end
@@ -4247,6 +4284,7 @@ function mod:SetStepMode(f, popH)
     popH = popH or 0
     if f.pbar then f.pbar:Hide() end   -- re-shown below for a progress-bar step
     f.chapter:Show(); f.step:Show()
+    if f.stepBadges then f.stepBadges:Hide(); f.stepBadges.w = 0; f.step:SetWidth(CW()) end   -- the step branch draws them
     f.tabZones:Hide(); f.tabDungeons:Hide(); self._tabMode = nil   -- Refresh decides (ShowTabs)
     if f.stepBtn then f.stepBtn:Show() end
     if f.objBtn then f.objBtn:Show() end
@@ -4317,6 +4355,8 @@ function mod:ApplyWidth()
     if not f._sizing and math.abs(f:GetWidth() - pw) > 0.5 then f:SetWidth(pw) end
     self:FitHeader()
     for _, fs in ipairs({ f.chapter, f.step, f.obj, f.side, f.meta, f.big }) do if fs then fs:SetWidth(cw) end end
+    -- the step line stops short of its badges
+    if f.stepBadges and f.stepBadges:IsShown() and (f.stepBadges.w or 0) > 0 then f.step:SetWidth(cw - f.stepBadges.w - 4) end
     for _, row in ipairs(f.qRows or {}) do row:SetWidth(cw) end
     for _, row in ipairs(f.questRows or {}) do
         if row.btn then row.btn:SetWidth(cw) end
@@ -4439,6 +4479,7 @@ function mod:Refresh()
         else
             f.step:SetText(("%s: |cff55ff55%s|r"):format(verb, name))   -- discovery pickup, no chain index
         end
+        self:StepBadges(f, step.qid)   -- group count, players here, "S" share (like the lines below)
 
         -- objective text (in-log) / gated hint / zone summary
         local obj = ""
