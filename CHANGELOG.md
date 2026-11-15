@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.31 — 2026-11-15
+
+- **WoW Forever: sharing works like a torrent now.** Quest givers, quest-mob spots and quest facts used to go to a few random players once and stop. Now every Void player compares what they know with one random player every few minutes and only what differs moves, so a find reaches everyone and players who log in later still get it, with the same small traffic at 50 or 5,000 players. VoidDungeon's mob marks and VoidSweep's rare spots, kill times and respawn times share the same network (one channel for all of them).
+- **Players on older versions keep working.** Their reports still count and they still get yours. Once no older version has been seen anywhere for 30 days, the old messages stop by themselves (they start again if one shows up). `/vq net` shows when an older version was last heard.
+
 ## 0.3.30 — 2026-11-14
 
 - **The quest you're on gets the same badges as the lines below it:** how many in your group are on it, how many VoidQuest players here are on it, and the **S** to share it with whoever doesn't have it. Alt-click it to share, and its tooltip lists who in your group has it.

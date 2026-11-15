@@ -48,6 +48,9 @@ if not VQ.ForeverQuests then return end   -- WoW Forever only (retail has Blizza
 
 local Share = VQ:NewModule("ForeverShare")
 VQ.Share = Share
+-- this VoidQuest hosts the swarm itself (Init): another addon's VoidSwarmLink stays out of it.
+-- (An older VoidQuest doesn't set this, so with one of those the link hosts instead.)
+if VoidSwarm then VoidSwarm.questHost = true end
 
 local PREFIX        = "VQUEST"
 local PROTO         = "1"
@@ -129,6 +132,18 @@ Share.heardMsgs, Share.heardFrom, Share.heardFromN = 0, {}, 0
 Share.gen = 0            -- bumped when sharing is turned off; stale scheduled replies check it
 
 local function enabled() return VQ:Get("share") ~= false end
+-- The network itself (channel, member list, swarm) stays up while ANOTHER Void addon still shares over
+-- it (VoidDungeon, VoidSweep), even with VoidQuest's own sharing off: /vq share only stops VoidQuest's
+-- data (the user, 2026-11-15: "yes change it"). Its swarm kinds q / s / f are paused then.
+local OWN_KINDS = { q = true, s = true, f = true, o = true }
+local function netOn()
+    if enabled() then return true end
+    local net = VoidSwarm and VoidSwarm.net
+    for k, spec in pairs(net and net.kinds or {}) do
+        if not OWN_KINDS[k] and not (spec.paused and spec.paused()) then return true end
+    end
+    return false
+end
 
 local function netIndex()
     local id = GetChannelName(CHANNEL_NAME)
@@ -156,16 +171,19 @@ end
 
 -- Strip anything that could act as an escape code or break the format, and cap the
 -- length without cutting a UTF-8 character in half.
+-- (written with a local per step, not "s = (s:gsub(...))": the test engine, gopher-lua, crashes on
+-- that form here; WoW didn't mind. Same result.)
 local function cleanName(s)
     if type(s) ~= "string" then return nil end
-    s = (s:gsub("[%c|;,:]", ""))
-    s = (s:gsub("^%s+", ""):gsub("%s+$", ""))
-    if #s > 40 then
-        s = s:sub(1, 40)
-        s = (s:gsub("[\192-\255][\128-\191]*$", ""))
+    local t = s:gsub("[%c|;,:]", "")
+    t = t:gsub("^%s+", "")
+    t = t:gsub("%s+$", "")
+    if #t > 40 then
+        t = t:sub(1, 40)
+        t = t:gsub("[\192-\255][\128-\191]*$", "")
     end
-    if s == "" then return nil end
-    return s
+    if t == "" then return nil end
+    return t
 end
 
 -- One name per player. Forever: "First Surname", unique per region, as the game gives
@@ -417,8 +435,16 @@ local function pump()
     end
 end
 
+-- the old formats (N / Q / B / M / F): only while an old client may still need them
+local function oldHeld(msg)
+    return (Share.legacy and msg:match("^[NQBMF]:") and not Share.legacy:Sending()) and true or false
+end
+Share.OldHeld = oldHeld   -- (tools/cmd/vq-share-test)
+
 local function send(msg, to)
-    if not to or not enabled() or #queue >= QUEUE_MAX then return end
+    if not to or #queue >= QUEUE_MAX then return end
+    if not enabled() and not (msg:byte(1) == 90 and netOn()) then return end   -- "Z": the swarm
+    if oldHeld(msg) then tally("held", msg) return end
     queue[#queue + 1] = { msg = msg, to = to }
     if not sending then
         pump()
@@ -467,6 +493,16 @@ end
 -- Send held finds whose own wait is over, or that are on a map you're no longer on. A find
 -- only counts as sent once it really goes out: with nobody to send to yet (member list not
 -- read, nobody online) or a busy queue it stays held and the next tick tries again.
+-- swarm values for your own finds (the swarm bridge, at Share:SwarmBridge)
+local function swQ(qid, s)   -- your quest giver as a swarm value
+    local name = cleanName(s.npc)
+    if not (name and s.id and s.x and s.y) then return nil end
+    return ("%d,%d,%d,%s"):format(s.id, math.floor(s.x * 10000 + 0.5), math.floor(s.y * 10000 + 0.5), name)
+end
+local function swS(o)        -- your mob spot as a swarm key + value
+    return ("%d/%d/%d"):format(o.npc, math.floor(o.x / 100), math.floor(o.y / 100)), ("%d,%d,%d"):format(o.x, o.y, o.q or 0)
+end
+
 local function flush()
     if not enabled() then return end
     local here, now = C_Map.GetBestMapForUnit("player"), GetTime()
@@ -477,6 +513,13 @@ local function flush()
             pending[q] = nil
         elseif ((here and s.m ~= here) or now >= at) and #due < FLUSH_MAX then   -- no map known = not "left"
             due[#due + 1] = q   -- at most FLUSH_MAX a tick, so a batch always fits the queue
+        end
+    end
+    -- due finds go into the swarm too (its rounds carry them, whoever is online)
+    if Share.swarm then
+        for _, q in ipairs(due) do
+            local v = swQ(q, VoidQuestDB.starts[q])
+            if v then Share.swarm:Report("q", tostring(VoidQuestDB.starts[q].m), tostring(q), v) end
         end
     end
     if #due > 0 then
@@ -524,6 +567,8 @@ function Share:Ask(mapID)
     if #targets == 0 then tally("nobody", "Q"); return end
     lastQuery[mapID] = GetTime()
     for _, to in ipairs(targets) do send(("Q:%s:%d"):format(PROTO, mapID), to) end
+    -- and the swarm: 2 players for this map's givers and mob spots
+    if Share.swarm then Share.swarm:Interest("q", tostring(mapID)); Share.swarm:Interest("s", tostring(mapID)) end
 end
 
 local function ownOn(mapID)
@@ -624,8 +669,9 @@ local function addReport(qid, npcID, mapID, x, y, name, hash)
     return false
 end
 
-local function takeEntries(mapID, body, sender)
-    local hash, changed, n = senderHash(sender), false, 0
+local swFeed   -- (the swarm bridge, below): an old-format report also counts as a vote in the swarm
+local function takeEntries(mapID, body, sender, hashIn, fromSwarm)
+    local hash, changed, n = hashIn or senderHash(sender), false, 0
     for entry in body:gmatch("[^;]+") do
         n = n + 1
         if n > ENTRIES_MAX then break end
@@ -640,6 +686,7 @@ local function takeEntries(mapID, body, sender)
                 if not (own and own.how == "npc") and addReport(qid, npcID, mapID, x, y, name, hash) then
                     changed = true
                 end
+                if not fromSwarm and swFeed then swFeed("q", mapID, tostring(qid), ("%d,%s,%s,%s"):format(npcID, xs, ys, name), hash) end
             end
         end
     end
@@ -713,6 +760,11 @@ local function flushMobs()
             else
                 waiting = waiting + 1
             end
+        end
+    end
+    if Share.swarm then
+        for _, list in pairs(byMap) do
+            for _, o in ipairs(list) do local k, v = swS(o); Share.swarm:Report("s", tostring(o.m), k, v) end
         end
     end
     if due == 0 then
@@ -813,9 +865,9 @@ local function evictMob(heard)
     return true
 end
 
-local function takeMobs(mapID, body, sender)
+local function takeMobs(mapID, body, sender, hashIn, fromSwarm)
     local heard = mobDB()
-    local hash, n, changed = senderHash(sender), 0, false
+    local hash, n, changed = hashIn or senderHash(sender), 0, false
     for entry in body:gmatch("[^;]+") do
         n = n + 1
         if n > ENTRIES_MAX then break end
@@ -823,6 +875,9 @@ local function takeMobs(mapID, body, sender)
         local npc, x, y, q = tonumber(ns), tonumber(xs), tonumber(ys), tonumber(qs)
         if npc and npc > 0 and x and y and x > 0 and y > 0 and x < 1000 and y < 1000 then
             if q == 0 or not VQ.ForeverQuests[q] then q = nil end
+            if not fromSwarm and swFeed then
+                swFeed("s", mapID, ("%d/%d/%d"):format(npc, math.floor(x / 100), math.floor(y / 100)), ("%d,%d,%d"):format(x, y, q or 0), hash)
+            end
             local mob = heard[npc]
             if not mob then
                 if mobCount >= MOB_MAX and not evictMob(heard) then tally("dropped", "mobs full"); break end
@@ -1049,6 +1104,9 @@ local function flushFacts()
             end
         end
     end
+    if Share.swarm then
+        for _, d in ipairs(due) do Share.swarm:Report("f", tostring(d[1] % 64), d[1] .. "/" .. d[2], d[3]) end
+    end
     -- stop only when nothing is left to send (still-held facts keep the ticker: Codex review)
     if #due == 0 then
         if factTicker and not anyUnsent(f) then factTicker:Cancel(); factTicker = nil end
@@ -1169,7 +1227,7 @@ end
 -- gets ONE vote per quest and field, whatever value (Codex review: one sender sending three
 -- values could otherwise fill every slot); a full list makes room by dropping a value only
 -- one player backs.
-local function takeFact(qid, body, sender)
+local function takeFact(qid, body, sender, hashIn, fromSwarm)
     local field, value = body:match("^([ipewmx])=([%d%.]+)$")
     if not field or #value > 120 or not VQ.ForeverQuests[qid] then tally("dropped", "fact"); return end
     if ((field == "e" or field == "x") and value ~= "1") or (field == "w" and not WAIT_BUCKETS[value])
@@ -1183,7 +1241,8 @@ local function takeFact(qid, body, sender)
     f.heard[qid] = q
     local voters = q[field .. "v"] or {}
     q[field .. "v"] = voters
-    local h = senderHash(sender)
+    local h = hashIn or senderHash(sender)
+    if not fromSwarm and swFeed then swFeed("f", tostring(qid % 64), qid .. "/" .. field, value, h) end
     if voters[h] then return end   -- this player already voted on this quest's field
     local byVal = q[field] or {}
     q[field] = byVal
@@ -1255,7 +1314,17 @@ function Share:OnMessage(msg, sender, replyTo)
         pcall(VQ.GroupUp.OnMessage, VQ.GroupUp, msg, sender, replyTo)
         return
     end
-    if not enabled() or sender == me or not VoidQuestDB then return end
+    if sender == me or not VoidQuestDB then return end
+    -- the swarm (VoidSwarm.lua): ZH / ZW / ZG / ZP / ZO, while the network is on (its own kinds
+    -- follow their addons' switches)
+    if msg:match("^Z%u") then
+        if not netOn() then return end
+        tally("got", msg)
+        if not rateOK(sender) then tally("dropped", "rate"); return end
+        if Share.swarm then pcall(Share.swarm.OnMessage, Share.swarm, msg, sender) end
+        return
+    end
+    if not enabled() then return end
     tally("got", msg)
     if not rateOK(sender) then tally("dropped", "rate"); return end
     -- group asks (GroupUp.lua): GQ / GH / GA / GY / GN
@@ -1267,6 +1336,7 @@ function Share:OnMessage(msg, sender, replyTo)
     local fp, fq, fbody = msg:match("^F:(%d+):(%d+):(.+)$")
     if fp then
         if fp ~= PROTO then tally("dropped", "proto"); return end
+        if Share.legacy then Share.legacy:Heard(sender, "F") end
         takeFact(tonumber(fq), fbody, sender)
         return
     end
@@ -1274,6 +1344,7 @@ function Share:OnMessage(msg, sender, replyTo)
     if proto ~= PROTO then tally("dropped", "proto"); return end
     local mapID = tonumber(mapS)
     if not validMap(mapID) then tally("dropped", "map"); return end
+    if Share.legacy and (tag == "N" or tag == "Q" or tag == "B" or tag == "M") then Share.legacy:Heard(sender, tag) end
     Share.heardMsgs = Share.heardMsgs + 1
     local h = senderHash(sender)
     if not Share.heardFrom[h] and Share.heardFromN < HEARD_FROM_MAX then
@@ -1337,7 +1408,7 @@ joinRetry:SetScript("OnEvent", function(self)
 end)
 
 function Share:JoinNet()
-    if not enabled() then return end
+    if not netOn() then return end
     -- out of the old channels first, so their slots are free for the new one (Codex review).
     -- A banned one can't be left; it goes at logout.
     if not chatLocked() then
@@ -1390,17 +1461,31 @@ function Share:Apply()
         self:RestoreMobs()
         C_Timer.After(3, askHere)
     else
-        -- off means off: nothing queued, held or scheduled goes out any more
+        -- off means off: nothing of VoidQuest's queued, held or scheduled goes out any more. Swarm
+        -- messages of the other addons' data stay (their own switches decide; VoidSwarm drops a
+        -- paused kind's messages, VoidQuest's q / s / f among them)
         Share.gen = Share.gen + 1
+        local keep = {}
+        for _, item in ipairs(queue) do
+            local ok = item.msg:byte(1) == 90 and netOn() and Share.swarm and Share.swarm:stillOK({ msg = item.msg })
+            if ok then keep[#keep + 1] = { msg = ok.msg, to = item.to } end   -- (a ZH loses its paused pieces)
+        end
         wipe(queue)
+        for i, item in ipairs(keep) do queue[i] = item end
         wipe(pending)
         if sending then sending:Cancel(); sending = nil end
+        if #queue > 0 then sending = C_Timer.NewTicker(SEND_EVERY, pump) end
         if pendingTicker then pendingTicker:Cancel(); pendingTicker = nil end
         -- held mob spots too: dropped, not sent later
         if mobTicker then mobTicker:Cancel(); mobTicker = nil end
         local out = VoidQuestDB and VoidQuestDB.mobOut
         for i = #(out or {}), 1, -1 do if not out[i].sent then table.remove(out, i) end end
-        if netIndex() then LeaveChannelByName(CHANNEL_NAME) end
+        -- the channel stays while another Void addon still shares over it
+        if netOn() then
+            self:JoinNet()
+        elseif netIndex() then
+            LeaveChannelByName(CHANNEL_NAME)
+        end
     end
     publish()
 end
@@ -1426,6 +1511,97 @@ local function bouncedName(text)
     end
 end
 local function hideOfflineNotice(_, _, text) return bouncedName(text) ~= nil end
+
+----------------------------------------------------------------------
+-- The swarm bridge (2026-11-15, stage 3): quest data rides the swarm (VoidSwarm.lua) as well as the
+-- old messages. The stores above stay what VoidQuest reads (heard / mobHeard / facts, with their own
+-- rules: votes, averaging, eviction); the swarm is a second way in and out of them:
+--   q  piece = map,   key = quest ID,            value = "npc,x,y,name" (x/y 0..9999)
+--   s  piece = map,   key = "npc/cellX/cellY",   value = "x,y,quest"    (x/y 0..999, cell = x/100)
+--   f  piece = quest % 64, key = "quest/field",  value = the fact (i / p / e / w / m / x)
+-- Every vote the swarm accepts goes through the old handler (onTake), and every old-format report
+-- also counts as a swarm vote (swFeed), so old and new clients feed one pool. Your own finds go into
+-- the swarm the moment they're due (after the same hold: left the map, or 10-20 min).
+-- The old messages retire 30 days after no old-only client is heard (VoidSwarm.Legacy "vq": every
+-- old-format message taken in is reported to it, and send() holds old formats once it says so).
+----------------------------------------------------------------------
+
+function Share:SwarmBridge(net)
+    local function paused() return not enabled() end   -- /vq share off: VoidQuest's data stays on this PC
+    VoidQuestDB.swarm = VoidQuestDB.swarm or {}
+    local SW = VoidQuestDB.swarm
+    SW.q, SW.s, SW.f = SW.q or {}, SW.s or {}, SW.f or {}
+    local feeding = false
+    swFeed = function(kind, piece, key, value, hash)
+        feeding = true
+        pcall(net.take, net, kind, tostring(piece), key, value, hash)
+        feeding = false
+    end
+    local function nearQ(a, b)
+        local n1, x1, y1, m1 = a:match("^(%d+),(%d+),(%d+),(.+)$")
+        local n2, x2, y2, m2 = b:match("^(%d+),(%d+),(%d+),(.+)$")
+        return n1 and n1 == n2 and m1 == m2 and math.abs(x1 - x2) <= NEAR * 10000 and math.abs(y1 - y2) <= NEAR * 10000
+    end
+    net:Register("q", { paused = paused, need = CONFIRM, store = SW.q, maxPieces = 400, maxKeys = 400, near = nearQ,
+        valid = function(piece, key, value)
+            local m, q = tonumber(piece), tonumber(key)
+            local n, x, y, name = value:match("^(%d+),(%d+),(%d+),(.+)$")
+            x, y = tonumber(x), tonumber(y)
+            return m and validMap(m) and q and VQ.ForeverQuests[q] and n and tonumber(n) > 0 and x and y
+                and x > 0 and x < 10000 and y > 0 and y < 10000 and cleanName(name) == name
+        end,
+        onTake = function(piece, key, _, holder, orig)
+            if feeding then return end
+            takeEntries(tonumber(piece), key .. "," .. orig, nil, holder, true)
+        end })
+    net:Register("s", { paused = paused, need = MOB_CONFIRM, store = SW.s, maxPieces = 400, maxKeys = 600,
+        near = function(a, b)
+            local x1, y1 = a:match("^(%d+),(%d+),"); local x2, y2 = b:match("^(%d+),(%d+),")
+            return x1 and x2 and math.abs(x1 - x2) <= MOB_NEAR and math.abs(y1 - y2) <= MOB_NEAR
+        end,
+        valid = function(piece, key, value)
+            local m = tonumber(piece)
+            local npc, cx, cy = key:match("^(%d+)/(%d)/(%d)$")
+            local x, y, q = value:match("^(%d+),(%d+),(%d+)$")
+            x, y = tonumber(x), tonumber(y)
+            return m and validMap(m) and npc and tonumber(npc) > 0 and x and y and x > 0 and y > 0 and x < 1000 and y < 1000
+                and math.floor(x / 100) == tonumber(cx) and math.floor(y / 100) == tonumber(cy)
+        end,
+        onTake = function(piece, key, _, holder, orig)
+            if feeding then return end
+            local npc = key:match("^(%d+)/")
+            takeMobs(tonumber(piece), npc .. "," .. orig, nil, holder, true)
+        end })
+    net:Register("f", { paused = paused, need = CONFIRM, store = SW.f, maxPieces = 64, maxKeys = 600,
+        valid = function(piece, key, value)
+            local q, field = key:match("^(%d+)/([ipewmx])$")
+            q = tonumber(q)
+            return q and VQ.ForeverQuests[q] and tostring(q % 64) == piece and value:match("^[%d%.]+$") ~= nil and #value <= 60
+        end,
+        onTake = function(_, key, value, holder)
+            if feeding then return end
+            local q, field = key:match("^(%d+)/(%a)$")
+            takeFact(tonumber(q), field .. "=" .. value, nil, holder, true)
+        end })
+    -- what you already shared before the swarm existed goes in now (not what's still held)
+    C_Timer.After(15, function()
+        for q, s in pairs(VoidQuestDB.starts or {}) do
+            if type(q) == "number" and shareable(s) and not seedHas(q, s) and not pending[q] and not fresh(s) then
+                local v = swQ(q, s)
+                if v then net:Report("q", tostring(s.m), tostring(q), v) end
+            end
+        end
+        local _, out = mobDB()
+        for _, o in ipairs(out or {}) do
+            if o.sent then local k, v = swS(o); net:Report("s", tostring(o.m), k, v) end
+        end
+        for q, e in pairs(facts().own) do
+            for _, field in ipairs(FACT_FIELDS) do
+                if e[field] and e.sent and e.sent[field] then net:Report("f", tostring(q % 64), q .. "/" .. field, e[field]) end
+            end
+        end
+    end)
+end
 
 function Share:Init()
     local today
@@ -1533,7 +1709,7 @@ function Share:Init()
         memberCount, roster, rosterAt, refusedAs = nil, {}, -ROSTER_EVERY, nil
         table.insert(OLD_CHANNELS, old)   -- JoinNet leaves it (now, or once chat unlocks)
         publish()   -- "—" until the new list is read
-        if not enabled() then
+        if not netOn() then
             if (GetChannelName(old) or 0) > 0 and not chatLocked() then LeaveChannelByName(old) end
             return
         end
@@ -1542,6 +1718,27 @@ function Share:Init()
             C_Timer.After(3, requestRoster)
         end)
     end)
+    -- The swarm (_shared/VoidSwarm.lua, 2026-11-15): torrent-style sharing for every Void addon's
+    -- data (VoidDungeon's mobs first). It rides this network: our member list, our whisper queue
+    -- (one shared pace: the game allows one message a second per prefix), our salted sender hash,
+    -- and the same off switch.
+    if VoidSwarm and VoidSwarm.Host then
+        local net = VoidSwarm.Host({
+            send = function(to, msg) send(msg, to) end,
+            members = function(k) requestRoster(); return pick(k) end,
+            me = function() return me end,
+            now = GetTime,
+            hash = senderHash,
+        })
+        Share.swarm = net
+        Share:SwarmBridge(net)
+        -- the old formats: until 30 days after the last old client (VoidSwarm.Legacy)
+        VoidQuestDB.legacy = VoidQuestDB.legacy or {}
+        if VoidSwarm.Legacy then Share.legacy = VoidSwarm.Legacy("vq", "q", VoidQuestDB.legacy) end
+        C_Timer.NewTicker(1, function()
+            if netOn() and not blocked() and #queue < QUEUE_MAX / 2 then pcall(net.Tick, net) end
+        end)
+    end
 end
 
 ----------------------------------------------------------------------
@@ -1592,10 +1789,11 @@ function Share:Stats()
             table.sort(out)
             return #out > 0 and table.concat(out, ", ") or "none"
         end
-        VQ:Print(("Traffic since %s -- sent: %s | received: %s | not sent, nobody online: %s | offline: %s | refused: %s | dropped: %s | questions with nothing new to answer: %s"):format(
+        VQ:Print(("Traffic since %s -- sent: %s | received: %s | not sent, nobody online: %s | offline: %s | refused: %s | dropped: %s | questions with nothing new to answer: %s | old format held back: %s"):format(
             date("%b %d %H:%M", s.since), list(s.sent), list(s.got), list(s.nobody), list(s.offline), list(s.refused),
-            list(s.dropped), list(s.unanswered)))
+            list(s.dropped), list(s.unanswered), list(s.held)))
     end
+    if self.legacy then VQ:Print(self.legacy:Line()) end
 end
 
 function Share:SelfTest()
