@@ -883,6 +883,10 @@ local function Tooltip(owner, id, anchor)
         GameTooltip:AddLine(("Bag: %d-slot %s%s"):format(bag[1], kind, name and (" (" .. name .. ")") or ""), 0.4, 1, 0.4)
     end
     if VQ.Worth then VQ.Worth:AddTooltip(GameTooltip, id) end
+    -- companion quests (Companions.lua): "Goes with <your quest>" on an open one, "Take along" on yours
+    if VQ.Companions then
+        if st == "log" then VQ.Companions:AddTooltip(GameTooltip, id) else VQ.Companions:AddPinLine(GameTooltip, id) end
+    end
     local giver = VQ.Starts and VQ.Starts:Giver(id)
     if giver then GameTooltip:AddLine("Given by " .. giver, 0.6, 1, 0.6) end
     local esc = st == "open" and F:EscortNote(id)
@@ -1037,11 +1041,28 @@ end
 function VoidQuestForeverPinMixin:OnAcquired(id, x, y, first)
     self.id, self.first = id, first
     self:SetPosition(x, y)
+    -- it goes with a quest in your log (Companions.lua): Blizzard's orange "important quest" bang,
+    -- bigger, on a layer above the turn-in "?" (the user's live check 2026-11-15: a plain gold tint on
+    -- the yellow "!" was hard to see, and Booty Bay's "?" pins hid Skullsplitter Tusks' "!")
+    local comp = not first and VQ.Companions and VQ.Companions:Of(id)
+    self.comp = comp and true or nil
     if self.icon then
         self.icon:SetDesaturated(first ~= nil)
-        if first then self.icon:SetVertexColor(0.75, 0.75, 0.85, 0.85) else self.icon:SetVertexColor(1, 1, 1, 1) end
+        local atlas = "UI-QuestPoiLegendary-QuestBang"
+        if comp and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+            self.icon:SetAtlas(atlas)
+            self.icon:SetVertexColor(1, 1, 1, 1)
+        else
+            self.icon:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
+            if first then self.icon:SetVertexColor(0.75, 0.75, 0.85, 0.85)
+            elseif comp then self.icon:SetVertexColor(1, 0.6, 0.15, 1)
+            else self.icon:SetVertexColor(1, 1, 1, 1) end
+        end
     end
-    self:SetSize(first and 15 or 18, first and 15 or 18)
+    self:UseFrameLevelType(comp and "PIN_FRAME_LEVEL_SUPER_TRACKED_CONTENT" or "PIN_FRAME_LEVEL_QUEST_OFFER")
+    if self.ApplyFrameLevel then pcall(self.ApplyFrameLevel, self) end
+    local size = first and 15 or (comp and 24 or 18)
+    self:SetSize(size, size)
     self:Show()
 end
 
@@ -1085,7 +1106,9 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
     local waiting = false
     for id, r in pairs(VQ.ForeverQuests or {}) do
         local s = F:Spot(id)
-        local here = s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open" and F:InScope(id)   -- Min / Mid / Max
+        -- Min / Mid / Max, or a quest that goes with one in your log (Companions.lua: shown whatever the tier)
+        local here = s and onThis(s.m) and F:Eligible(r) and F:Status(id) == "open"
+            and (F:InScope(id) or (VQ.Companions and VQ.Companions:Of(id)) ~= nil)
         local avail, first
         if here then avail, _, first = F:Available(id) end
         local ok = here and avail

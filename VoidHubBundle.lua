@@ -85,8 +85,10 @@ _G.VoidHubToggles = _G.VoidHubToggles or {}
 do
     -- 3: VoidSequencer, VoidPlates, VoidFrames and VoidCheatSheet listed on WoW Forever again (2 hid
     -- them as Midnight-only; all four work there; the user, 2026-11-11: "seq is not in the new hud")
-    -- 4: VoidDungeon listed (dungeon journal + marking board; it had no hub entry, the user 2026-11-14)
-    local QUICK_VERSION = 4
+    -- 4: VoidDungeon listed (dungeon guide + marking board; it had no hub entry, the user 2026-11-14)
+    -- 5: VoidCheatSheet is retail only (its WoW Forever sheets are in VoidDungeon, 2026-11-15): left
+    --    out on WoW Forever again
+    local QUICK_VERSION = 5
     if (_G.__VoidQuickVersion or 0) < QUICK_VERSION then
         _G.__VoidQuickVersion = QUICK_VERSION
         local Q = {}
@@ -105,7 +107,7 @@ do
             { "VoidProf", "Professions", 3 }, { "VoidGather", "Gathering", 3 }, { "VoidFisher", "Fishing", 3 },
             { "VoidBars", "Action bars", 4 }, { "VoidTank", "Tank tools", 4 }, { "VoidAlert", "Alerts", 4 },
             { "VoidSequencer", "Sequencer", 4 }, { "VoidPlates", "Nameplates", 4 },
-            { "VoidFrames", "Party frames", 4 }, { "VoidCheatSheet", "Cheat sheets", 4 },
+            { "VoidFrames", "Party frames", 4 }, { "VoidCheatSheet", "Cheat sheets", 4, true },
             { "VoidRaidTools", "Raid tools", 4, true }, { "VoidRaidToolsReader", "VRT reader", 4, true },
             { "VoidDice", "Dice", 4 }, { "VoidComp", "Comp tool", 4 },
             { "VoidBounty", "Bounties", 5 }, { "VoidScout", "Scout", 5 }, { "VoidPug", "Pug tracker", 5 },
@@ -522,7 +524,7 @@ local KNOWN_VOID_ADDONS = {
     { name = "VoidBounty",     label = "Bounties",          desc = "WoW Forever world PvP: enemy players nearby, the players who killed you, and writs paid in vendor goods." },
     { name = "VoidCalendar",   label = "Calendar",         public = true, desc = "A Void-themed calendar replacement that shows every event in your own time zone." },
     { name = "VoidCheatSheet", label = "Cheat Sheets",      public = true, desc = "In-game cheat sheets for every Midnight raid, the full Mythic+ pool, and delve bosses, auto-pops on pull." },
-    { name = "VoidDungeon",    label = "Dungeons",          public = true, desc = "WoW Forever dungeon journal inside VoidMap: maps, quests, boss loot, soft reserve, BoE handout and the marking board." },
+    { name = "VoidDungeon",    label = "Dungeons",          public = true, desc = "WoW Forever dungeon guide inside VoidMap: maps, quests, boss loot, soft reserve, BoE handout and the marking board." },
     { name = "VoidComp",       label = "Comp Tool",         desc = "Group composition planning and balance helper." },
     { name = "VoidDice",       label = "Dice Roller",       desc = "Standardized loot-roll rolls for raids." },
     { name = "VoidFisher",     label = "Fishing",           desc = "Fishing tracker: catches, their value and the best spots." },

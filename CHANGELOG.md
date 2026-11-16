@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.33 — 2026-11-15
+
+- **Quests to take along (WoW Forever):** hover a quest in your log to see the quests you haven't picked up that go with it: the same mobs, or mobs in the same area. Their "!" on the world map turns gold (even outside your density setting) and says which quest it goes with.
+
 ## 0.3.32 — 2026-11-15
 
 - **Credits:** the game data this addon ships is now called **VoidDB**; full credits and licences of the open data in it are in NOTICE.txt and the README.

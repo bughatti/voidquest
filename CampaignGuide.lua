@@ -3747,6 +3747,8 @@ local function QuestTipWithGroup(qid, zone, groupNames, clickHint)
         if VQ.Chains then VQ.Chains:AddTooltip(GameTooltip, qid) end
         -- WoW Forever: what the rest of the chain and the reputation are worth to you (QuestWorth.lua)
         if VQ.Worth then VQ.Worth:AddTooltip(GameTooltip, qid) end
+        -- WoW Forever: quests you haven't picked up that go with this one (Companions.lua)
+        if VQ.Companions then VQ.Companions:AddTooltip(GameTooltip, qid) end
         GameTooltip:Show()   -- resize for the added lines
     end
 end
