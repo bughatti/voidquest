@@ -24,6 +24,8 @@ local inView = {}   -- nameplate unit -> { name, quests = {...} or nil, rare = b
 
 local function safe(fn, ...) if not fn then return nil end local ok, a, b, c, d = pcall(fn, ...) if ok then return a, b, c, d end end
 local function secret(v) return issecretvalue and issecretvalue(v) end
+-- "n123" -> 123; nil for an object ("o456") or a spot ("e2932")
+local function npcOf(key) local s = type(key) == "string" and key:match("^n(%d+)$") return s and tonumber(s) or nil end
 
 local function Enabled() return VQ:Get("mobDots") ~= false end
 
@@ -88,7 +90,7 @@ local function hasSpotsOn(qid, mapID)
         local s = VQ.ForeverSpawns[r[2]]
         if s and s[mapID] then return true end
         -- or spots 3+ players confirmed for that mob here (ForeverShare)
-        local npc = tonumber(r[2]:match("^n(%d+)$"))
+        local npc = npcOf(r[2])
         if npc and Sh and Sh.MobPts and Sh:MobPts(npc, mapID) ~= "" then return true end
     end
     -- or mobs players confirmed count for it, with confirmed spots here
@@ -151,7 +153,7 @@ function M:AddQuestDots(out, qid, mapID)
         local o = ObjectiveFor(objs, kind == "d" and ItemName(item) or name)
         if not (o and o.finished) then
             -- VoidDB's spots + the spots you've SEEN this mob at (its nameplate came up)
-            local npc = tonumber(key:match("^n(%d+)$"))
+            local npc = npcOf(key)
             local learned = npc and seen[npc] and seen[npc].m and seen[npc].m[mapID] or ""
             -- + spots 3+ other players saw it at (ForeverShare)
             local crowd = npc and VQ.Share and VQ.Share.MobPts and VQ.Share:MobPts(npc, mapID) or ""
@@ -214,7 +216,10 @@ end
 -- Minimap dots: placed by hand (the minimap scrolls / rotates), same math as GiverPins.
 -- The dot list is rebuilt only when the quest log, the arrow or the map changes.
 ----------------------------------------------------------------------
-local COLOR = { k = { 1, 0.35, 0.25 }, d = { 1, 0.8, 0.15 }, o = { 0.35, 0.75, 1 }, q = { 1, 0.95, 0.55 } }
+-- r drops an item the quest needs (yellow like d), c counts as a kill (red), u use your item on it
+-- (blue like o), x a place to go (pale like the game's own area)
+local COLOR = { k = { 1, 0.35, 0.25 }, d = { 1, 0.8, 0.15 }, o = { 0.35, 0.75, 1 }, q = { 1, 0.95, 0.55 },
+    r = { 1, 0.8, 0.15 }, c = { 1, 0.35, 0.25 }, u = { 0.35, 0.75, 1 }, x = { 1, 0.95, 0.55 } }
 local SIZE = 7
 local MAX_MARKERS = 4   -- objectives shown at once, nearest first
 local ARRIVE = 25       -- yards: there, the marker goes (you can see them)
@@ -226,8 +231,9 @@ local function onEnter(self)
     if not d then return end
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:SetText(d.name or "?", 1, 0.82, 0)
-    local what = (d.kind == "k" and "Kill for: ") or (d.kind == "o" and "Use for: ")
-
+    local what = ((d.kind == "k" or d.kind == "c") and "Kill for: ") or (d.kind == "o" and "Use for: ")
+        or (d.kind == "u" and (ItemName(d.item) and ("Use " .. ItemName(d.item) .. " here for: ") or "Use for: "))
+        or (d.kind == "x" and "Go here for: ")
         or (d.kind == "q" and "Objective area (the game's own) for: ")
         or ("Drops " .. (ItemName(d.item) or d.objText or "the item") .. " for: ")
     GameTooltip:AddLine(what .. d.quest, 1, 1, 1, true)
@@ -429,12 +435,45 @@ local function IsQuestMob(npc)
         questMobSet = {}
         for _, refs in pairs(VQ.ForeverMobs or {}) do
             for _, r in ipairs(refs) do
-                local id = tonumber(r[2]:match("^n(%d+)$"))
+                local id = npcOf(r[2])
                 if id then questMobSet[id] = true end
             end
         end
     end
     return questMobSet[npc] == true
+end
+
+-- Mobs the game's tooltip never names for a quest, though they're part of it (r: drops an item the
+-- quest needs that isn't an objective, Grim Message's Witherbark Skulls; c: kill credit; u: use your
+-- quest item on it). The user, 2026-11-16: "the mobs dont have our quest sword on them". npc -> qids.
+local dataMobQuests
+local DATA_KINDS = { r = true, c = true, u = true }
+local function DataQuests(npc)
+    if not dataMobQuests then
+        dataMobQuests = {}
+        for qid, refs in pairs(VQ.ForeverMobs or {}) do
+            for _, r in ipairs(refs) do
+                local id = DATA_KINDS[r[1]] and npcOf(r[2])
+                if id then
+                    dataMobQuests[id] = dataMobQuests[id] or {}
+                    table.insert(dataMobQuests[id], qid)
+                end
+            end
+        end
+    end
+    local out
+    for _, qid in ipairs(dataMobQuests[npc] or {}) do
+        -- only while it's in your log and not done yet
+        local inLog = safe(C_QuestLog.GetLogIndexForQuestID, qid)
+        if inLog and not secret(inLog) and inLog > 0 and not safe(C_QuestLog.IsComplete, qid) then
+            local title = safe(C_QuestLog.GetTitleForQuestID, qid)
+            if title and not secret(title) then
+                out = out or {}
+                out[#out + 1] = { quest = title, text = "for " .. title }
+            end
+        end
+    end
+    return out
 end
 
 -- a quest in your log by its title (the nameplate tooltip names quests by title)
@@ -580,7 +619,7 @@ local function QuestMobByName(n)
     if not byName then
         byName = {}
         for key, mobName in pairs(VQ.ForeverMobNames or {}) do
-            local id = tonumber(key:match("^n(%d+)$"))
+            local id = npcOf(key)
             if id and IsQuestMob(id) then
                 if byName[mobName] == nil then byName[mobName] = id else byName[mobName] = false end
             end
@@ -611,6 +650,10 @@ local function Mark(unit)
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
     if not plate or (plate.IsForbidden and plate:IsForbidden()) then return end
     local quests = QuestInfo(unit)
+    if not quests then
+        local npc = NpcID(unit)
+        quests = npc and DataQuests(npc) or nil
+    end
     local cls = UnitClassification(unit)
     if cls and secret(cls) then cls = nil end
     local rare = cls == "rare" or cls == "rareelite" or cls == "worldboss"

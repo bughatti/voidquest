@@ -88,7 +88,7 @@ do
     -- 4: VoidDungeon listed (dungeon guide + marking board; it had no hub entry, the user 2026-11-14)
     -- 5: VoidCheatSheet is retail only (its WoW Forever sheets are in VoidDungeon, 2026-11-15): left
     --    out on WoW Forever again
-    local QUICK_VERSION = 5
+    local QUICK_VERSION = 6
     if (_G.__VoidQuickVersion or 0) < QUICK_VERSION then
         _G.__VoidQuickVersion = QUICK_VERSION
         local Q = {}
@@ -345,6 +345,8 @@ do
             box = CreateFrame("Frame", "VoidHubDrawer", UIParent, "BackdropTemplate")
             box:SetSize(240, 60)
             box:SetFrameStrata("HIGH")
+            box:SetToplevel(true)   -- opens / clicks in front of other Void windows (2026-11-16)
+            box:HookScript("OnShow", function(self) self:Raise() end)
             box:SetClampedToScreen(true)
             box:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = VoidPX() })
             box:SetBackdropColor(0.05, 0.05, 0.07, 0.96)
@@ -760,6 +762,8 @@ local function BuildInfoFrame()
     infoFrame:SetSize(440, 540)
     infoFrame:SetPoint("CENTER")
     infoFrame:SetFrameStrata("HIGH")
+    infoFrame:SetToplevel(true)
+    infoFrame:HookScript("OnShow", function(self) self:Raise() end)
     infoFrame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",

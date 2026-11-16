@@ -44,6 +44,8 @@
 -- tools/cmd/vq-seed bundles the confirmed ones (n >= 2) into ForeverSeed.lua.
 ----------------------------------------------------------------------
 local VQ = VoidQuest
+-- "n123" -> 123; nil for an object ("o456") or a spot ("e2932")
+local function npcOf(key) local s = type(key) == "string" and key:match("^n(%d+)$") return s and tonumber(s) or nil end
 if not VQ.ForeverQuests then return end   -- WoW Forever only (retail has Blizzard's own pins)
 
 local Share = VQ:NewModule("ForeverShare")
@@ -981,7 +983,7 @@ function Share:BackfillMobs()
     local quest = {}
     for _, refs in pairs(VQ.ForeverMobs or {}) do
         for _, r in ipairs(refs) do
-            local id = tonumber(r[2]:match("^n(%d+)$"))
+            local id = npcOf(r[2])
             if id then quest[id] = true end
         end
     end

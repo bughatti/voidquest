@@ -1,5 +1,15 @@
 # VoidQuest Changelog
 
+## 0.3.34 — 2026-11-16
+
+- **WoW Forever: 217 more quests get the gold sword and map dots.** The game's tooltip only names the mobs your quest log asks for, so many quests had nothing at all. Now VoidQuest marks them itself:
+  - **Mobs that drop something the quest needs** even when the log doesn't list it (Grim Message's Witherbark Skulls for Nimboya's pike).
+  - **Places to go**, as a spot on your map ("Go here for: ..."), gone once that part is done.
+  - **What to use your quest item on**, and things like "use the cannon".
+  - **Mobs whose kills count** for your quest.
+  - The sword shows only while that quest is in your log and not finished.
+- Windows open in front of the Void windows already open, and come forward when you click them.
+
 ## 0.3.33 — 2026-11-15
 
 - **Quests to take along (WoW Forever):** hover a quest in your log to see the quests you haven't picked up that go with it: the same mobs, or mobs in the same area. Their "!" on the world map turns gold (even outside your density setting) and says which quest it goes with.
