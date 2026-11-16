@@ -1,5 +1,15 @@
 # VoidQuest Changelog
 
+## 0.3.35 — 2026-11-16
+
+- **WoW Forever: whose loot is this mob?** Hover a mob and a small box above its tooltip tells you:
+  - **"Loot: free, not tagged yet"**: nobody has hit it.
+  - **"Loot: yours"** or **"your group's"** (with the loot rule) while it's fighting you or your group.
+  - **"Loot: someone else's"**: another player tagged it first, and who it's fighting when that's another player.
+  - **"Loot: open"**: it's fighting something else and no other player has tagged it.
+  - On a corpse with loot left: **"yours, loot it"** or **"not yours"**.
+  - Turn it off in Settings > Guidance > "Whose loot on mob tooltips".
+
 ## 0.3.34 — 2026-11-16
 
 - **WoW Forever: 217 more quests get the gold sword and map dots.** The game's tooltip only names the mobs your quest log asks for, so many quests had nothing at all. Now VoidQuest marks them itself:

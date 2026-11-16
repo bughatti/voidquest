@@ -24,6 +24,7 @@ VQ.SettingsDefaults = {
     -- general
     minimapShow = true, announceActions = false, blizzTracker = true,
     share = true,   -- WoW Forever: share quest-giver spots with other VoidQuest players (ForeverShare.lua)
+    mobLoot = true, -- "Loot: yours / someone else's" on mob tooltips (MobLoot.lua)
 }
 
 function VQ:Get(key)
@@ -179,6 +180,9 @@ function mod:EnsurePanel()
     makeCheck(f, x, y, "Native objective ring (super-track)", "superTrack", "Use Blizzard's objective-area blob + tracking arrow for in-progress quests."); y = y - 24
     makeCheck(f, x, y, "Objective ring on the world map", "showRing", "Draw a green circle on the world map where the current step happens -- the quest giver, the objective area, or the turn-in."); y = y - 26
     makeCheck(f, x, y, "Highlight needed quest givers", "giverPins", "Light-blue halo on the world map (under Blizzard's !) and minimap for the quest givers in your scope: the Density tier plus the chain the guide follows. Turn Blizzard's Outline Mode off so only these stand out."); y = y - 24
+    if VQ.MobLoot then   -- (WoW Forever only for now: MobLoot.lua returns early on retail)
+        makeCheck(f, x, y, "Whose loot on mob tooltips", "mobLoot", "A line on a mob's tooltip: yours, your group's (and the loot rule), someone else's, or free. On a corpse: whether you can loot it."); y = y - 24
+    end
     -- WoW Forever has its own tier (foreverDensity, Chains.lua C:InScope)
     makeSegment(f, x, y, "Density", VQ.ForeverQuests and "foreverDensity" or "density", { { val = "min", text = "Min" }, { val = "mid", text = "Mid" }, { val = "max", text = "Max" } }); y = y - 26
     makeSegment(f, x, y, "Zone order", "zoneOrder", { { val = "nearest", text = "Nearest" }, { val = "grouped", text = "Grouped" } }); y = y - 28
