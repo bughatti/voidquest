@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.36 — 2026-11-16
+
+- **WoW Forever: a quest item you'll need later says so.** Hover it and VoidQuest tells you the quest it's for, its level, who gives it and where, and whether you can take it yet ("Needs level 35 (you're 30)", "First: ...", or "You can take it now").
+  - Every WoW Forever quest counts, not just the ones in your log, so an item for a quest you haven't picked up yet is marked keep.
+  - Items used somewhere first are covered too: the **Sacred Mallet** says to use it at the altar on top of Jintha'Alor to make the Mallet of Zul'Farrak, which summons Gahz'rilla in Zul'Farrak.
+- **No more yellow ? on quest items in your bags.** It meant "no quest found" but read as "delete me". An item VoidQuest can't place now has no mark, and its tooltip says to keep it if unsure. The red X ("safe to destroy") only shows when its quest is turned in and no other quest needs it.
+- After updating, restart WoW fully (a /reload isn't enough: there's a new data file).
+
 ## 0.3.35 — 2026-11-16
 
 - **WoW Forever: whose loot is this mob?** Hover a mob and a small box above its tooltip tells you:

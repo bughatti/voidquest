@@ -4,12 +4,14 @@
 -- which ones you can throw away (the user, 2026-11-06). This works out, for every
 -- quest item in your bags, whether anything still needs it:
 --
---   keep    : it starts a quest you haven't done, or a quest in your log needs it
---             (objective, the item the quest handed you / links, or its text names it)
---   done    : no quest in your log needs it, and a quest it belonged to is turned in
---             ("safe to destroy" -- it was seen tied to that quest)
---   unneeded: no quest in your log needs it, and VoidQuest never saw what it was for.
---             Softer: some chains drop an item before you have the quest that uses it.
+--   keep    : it starts a quest you haven't done, a quest in your log needs it (objective, the
+--             item the quest handed you / links, or its text names it), a WoW Forever quest you
+--             haven't done needs it (ForeverItemQuests.lua: "for a later quest"), or it's on the
+--             hand-made KEEP list (used somewhere to make / summon what a quest needs)
+--   done    : none of that, and a quest it belonged to is turned in ("safe to destroy" -- it
+--             was seen tied to that quest)
+--   unknown : no quest found for it. No mark in the bags, only a tooltip line ("keep it if
+--             unsure"): it used to be a yellow ? that read as "delete me" (2026-11-16).
 --
 -- Marks only: nothing is ever deleted or sold for you. VoidBags shows the verdict on
 -- the item and in its tooltip; /vq leftovers lists them.
@@ -66,7 +68,82 @@ local function DoneForGood(qid)
     return Done(qid) and not safe(C_QuestLog.IsRepeatableQuest, qid)
 end
 
--- itemID -> { verdict = "keep" | "done" | "unneeded", why = text, name = item name }
+-- Chains no quest data shows: the item is used somewhere to make or summon what a quest needs (the
+-- user, 2026-11-16: "i have a sacred mallet in my bag that is for a quest later"). Always "keep".
+-- Checked: warcraft.wiki.gg Sacred_Mallet / Mallet_of_Zul'Farrak; VoidDB: Gahz'rilla (7273) drops
+-- Gahz'rilla's Electrified Scale (8707), which the quest Gahz'rilla (2770) asks for.
+local KEEP = {
+    [9241] = { q = 2770, why = "Use it at the altar on top of Jintha'Alor (the Hinterlands) to make the Mallet of Zul'Farrak, which summons Gahz'rilla in Zul'Farrak" },
+    [9240] = { q = 2770, why = "Strike the gong in Zul'Farrak with it to summon Gahz'rilla" },
+}
+
+-- The WoW Forever quests you haven't done (and can take) that need this item, from VoidDB's quest data
+-- (ForeverItemQuests.lua), lowest level first: { q1, q2, ... } or nil.
+local function MinLevel(q)
+    local rule = VQ.ForeverRules and VQ.ForeverRules[q]
+    return (rule and rule.ml) or 0
+end
+local function LaterQuests(itemID)
+    local qs = VQ.ForeverItemQuests and VQ.ForeverItemQuests[itemID]
+    if not qs then return nil end
+    local F, out = VQ.Forever, {}
+    for _, q in ipairs(qs) do
+        if not safe(C_QuestLog.IsQuestFlaggedCompleted, q) then
+            local row = VQ.ForeverQuests and VQ.ForeverQuests[q]
+            local ok = true
+            if F and F.Eligible and row then ok = F:Eligible(row) end
+            if ok then out[#out + 1] = q end
+        end
+    end
+    if #out == 0 then return nil end
+    table.sort(out, function(a, b)
+        local la, lb = MinLevel(a), MinLevel(b)
+        if la ~= lb then return la < lb end
+        return a < b
+    end)
+    return out
+end
+
+-- WoW Forever without the item -> quest index loaded (never expected, it ships): nothing may be
+-- called "safe to destroy" then, since a later quest could need it (Codex review)
+local function IndexMissing()
+    return VQ.ForeverQuests ~= nil and VQ.ForeverItemQuests == nil
+end
+
+-- Tooltip lines for one quest: what, from whom and where, and whether you can take it yet.
+local function MapName(m)
+    local info = m and safe(C_Map.GetMapInfo, m)
+    return info and info.name
+end
+local function QuestLines(tt, q)
+    local F = VQ.Forever
+    local lvl = F and F.Level and F:Level(q)
+    local title = QuestTitle(q)
+    tt:AddLine("  " .. title .. ((lvl and lvl > 0) and (" [" .. lvl .. "]") or ""), 1, 0.82, 0)
+    local sd = VQ.ForeverSeed and VQ.ForeverSeed[q]
+    if sd and sd.giver then
+        local where = MapName(sd.m)
+        local at = (where and sd.x and sd.y) and (" (%.1f, %.1f)"):format(sd.x * 100, sd.y * 100) or ""
+        tt:AddLine("    From " .. sd.giver .. (where and (", " .. where) or "") .. at, 0.9, 0.9, 0.9)
+    end
+    if safe(C_QuestLog.GetLogIndexForQuestID, q) then
+        tt:AddLine("    In your quest log", 0.24, 0.86, 0.52)
+        return
+    end
+    local state, why = nil, nil
+    if F and F.Rule then state, why = F:Rule(q) end
+    if state == "later" and why then
+        local mine = UnitLevel and UnitLevel("player")
+        local extra = (why:find("^Needs level") and mine) and (" (you're " .. mine .. ")") or ""
+        tt:AddLine("    " .. why .. extra, 1, 0.6, 0.2)
+    elseif state ~= "never" then
+        tt:AddLine("    You can take it now", 0.24, 0.86, 0.52)
+    end
+end
+
+-- itemID -> { verdict = "keep" | "done" | "unknown", why = text, name = item name }
+-- ("unknown" replaced "unneeded", which VoidBags drew as a yellow ?: people read it as "safe to delete"
+-- when it only meant "no quest found", 2026-11-16. Unknown items get no mark, only a tooltip line.)
 local cache, dirty = {}, true
 
 local missing = false   -- a quest item whose data hadn't loaded: rebuild when it arrives
@@ -123,9 +200,26 @@ local function Build()
                     if not v and starts and not Done(starts) then
                         v = { verdict = "keep", why = ("Starts a quest: %s"):format(QuestTitle(starts)) }
                     end
+                    -- 2b) a quest you haven't picked up yet needs it (any WoW Forever quest)
+                    if not v then
+                        local later = LaterQuests(id)
+                        if later then
+                            local lvl = MinLevel(later[1])
+                            v = { verdict = "keep", later = later,
+                                  why = ("Keep: for a later quest, %s%s"):format(QuestTitle(later[1]),
+                                      lvl > 0 and (" (from level " .. lvl .. ")") or "") }
+                        end
+                    end
+                    -- 2c) chains the data can't see (KEEP above)
+                    if not v and KEEP[id] then
+                        local k = KEEP[id]
+                        v = { verdict = "keep", how = k.why, later = (k.q and not Done(k.q)) and { k.q } or nil,
+                              why = "Keep: " .. k.why .. ((k.q and not Done(k.q))
+                                  and (" (quest: " .. QuestTitle(k.q) .. ")") or "") }
+                    end
                     -- 3) nothing needs it now. "Safe to destroy" only when the evidence is
                     -- strong AND every quest it was ever tied to is turned in (an item tied
-                    -- to two quests isn't done when only one is). Anything less: "unneeded".
+                    -- to two quests isn't done when only one is). Anything less: "unknown".
                     if not v then
                         local ties = {}
                         for qid, s in pairs((VoidQuestDB and VoidQuestDB.itemSeen and VoidQuestDB.itemSeen[id]) or {}) do
@@ -140,13 +234,13 @@ local function Build()
                             if s == "strong" then anyStrong = true; named = named or qid end
                             if not DoneForGood(qid) then allDone = false end
                         end
-                        if anyStrong and allDone then
+                        if anyStrong and allDone and not IndexMissing() then   -- (no index: never "safe", Codex)
                             v = { verdict = "done", why = (starts and named == starts)
                                 and ("Starts %s, which you've done"):format(QuestTitle(starts))
                                 or ("Leftover: %s is turned in"):format(QuestTitle(named)) }
                         end
                     end
-                    v = v or { verdict = "unneeded", why = "No quest in your log needs this" }
+                    v = v or { verdict = "unknown", why = "No quest found for this item" }
                     v.name = name
                     cache[id] = v
                 end
@@ -155,7 +249,7 @@ local function Build()
     end
 end
 
--- Verdict for an item in your bags: "keep" | "done" | "unneeded" (nil = not a quest
+-- Verdict for an item in your bags: "keep" | "done" | "unknown" (nil = not a quest
 -- item, or not in your bags), plus the reason. Used by VoidBags.
 local function Verdict(itemID)
     if not itemID then return nil end
@@ -172,19 +266,19 @@ VoidQuest_LeftoverVerdict = Verdict
 -- /vq leftovers
 VQ.LeftoversList = function()
     Build()
-    local done, unneeded, keep = {}, {}, 0
+    local done, unknown, keep = {}, {}, 0
     for _, v in pairs(cache) do
         if v.verdict == "done" then done[#done + 1] = v
-        elseif v.verdict == "unneeded" then unneeded[#unneeded + 1] = v
+        elseif v.verdict == "unknown" then unknown[#unknown + 1] = v
         else keep = keep + 1 end
     end
     local p = "|cff00c7ffVoidQuest|r "
-    if #done + #unneeded == 0 then
+    if #done + #unknown == 0 then
         print(p .. ("no leftover quest items (%d quest item%s in your bags, all still needed)"):format(keep, keep == 1 and "" or "s"))
         return
     end
     for _, v in ipairs(done) do print(p .. "|cff3ddc84safe to destroy|r " .. v.name .. " - " .. v.why) end
-    for _, v in ipairs(unneeded) do print(p .. "|cffffd100probably not needed|r " .. v.name .. " - " .. v.why) end
+    for _, v in ipairs(unknown) do print(p .. "|cffaaaaaanot sure, keep if unsure|r " .. v.name .. " - " .. v.why) end
     if keep > 0 then print(p .. ("%d other quest item%s still needed"):format(keep, keep == 1 and "" or "s")) end
 end
 
@@ -196,10 +290,26 @@ if TooltipDataProcessor and Enum.TooltipDataType then
         local verdict, why = Verdict(data.id)
         if verdict == "done" then
             tt:AddLine("VoidQuest: " .. why .. " - safe to destroy", 1, 0.42, 0.42, true)
-        elseif verdict == "unneeded" then
-            tt:AddLine("VoidQuest: " .. why .. " (some quests use an item before you have them)", 1, 0.82, 0, true)
+        elseif verdict == "unknown" then
+            tt:AddLine("VoidQuest: " .. why .. ". Some items are used later, so keep it if unsure.", 0.67, 0.67, 0.67, true)
         elseif verdict == "keep" then
-            tt:AddLine("VoidQuest: " .. why, 0.24, 0.86, 0.52, true)
+            -- What it's for and when (the user, 2026-11-16: "when we hover over an item like this it
+            -- states what it is for and when, all the data they need to know"): the how-to for a
+            -- hand-made chain, then each later quest with its giver, where, and whether you can take it.
+            local v = cache[data.id]
+            if v and (v.later or v.how) then
+                tt:AddLine("VoidQuest: keep this" .. (v.later and ", a quest you haven't done needs it" or ""), 0.24, 0.86, 0.52, true)
+                if v.how then tt:AddLine("  " .. v.how, 0.9, 0.9, 0.9, true) end
+                for i, q in ipairs(v.later or {}) do
+                    if i > 3 then
+                        tt:AddLine(("  and %d more"):format(#v.later - 3), 0.6, 0.6, 0.6)
+                        break
+                    end
+                    QuestLines(tt, q)
+                end
+            else
+                tt:AddLine("VoidQuest: " .. why, 0.24, 0.86, 0.52, true)
+            end
         end
     end)
 end
