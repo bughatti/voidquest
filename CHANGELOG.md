@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.38 — 2026-11-17
+
+- **Layer helping finds players faster (WoW Forever).** A layer question now reaches the Void players it asks in about a second instead of eleven, so Refresh and hops see the other layers right away. Same message rate over time, well under the game's limit.
+
 ## 0.3.37 — 2026-11-17
 
 - **VoidNet: one hidden channel for every Void addon (WoW Forever).** VoidLayer, VoidSweep, VoidQuest, VoidGather, VoidBounty and VoidDungeon now share ONE channel instead of one each. The Void players box shows **VoidNet** (every Void addon player online, each counted once) with **Layer helpers** under it. Players on an older version are still reached through the old channel, which goes away 30 days after the last of them updates.

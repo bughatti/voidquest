@@ -210,27 +210,47 @@ function ns.LayerCoreBuild(owner)
     -- traffic this session, for /vl net: whispers the game took, refused as offline (result 12),
     -- or refused otherwise. Bounces ("No player named X") are net.bounces.
     local traffic = { sent = 0, offline = 0, refused = 0 }
+    -- Sending (2026-11-17, live): the game lets ~10 addon messages go at once per prefix, then ~1 a second.
+    -- One message every SEND_EVERY took a 10-player question 11 s to send, longer than the 6 s report,
+    -- so answers came in after "only your layer" (0.6 s before VoidNet: 6 s). Now a burst of up to
+    -- C.burst goes at once and refills at one per SEND_EVERY: same rate over time, under the game's limit.
+    -- (Table fields, not locals: this function is at Lua 5.1's 200-locals limit.)
     local queue, pumping = {}, nil
+    C.burst, C.tokens, C.filled = 8, 8, now()
     local function pump()
-        local item = table.remove(queue, 1)
-        if not item then
-            if pumping then pumping:Cancel(); pumping = nil end
-            return
-        end
-        net:Noted(item.to)
-        local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
-        local k = (result == nil or result == true or result == 0) and "sent" or result == 12 and "offline" or "refused"
-        traffic[k] = traffic[k] + 1
-        net:Sent(item.to, result)
+        -- one run at a time (Sol 2026-11-17): net:Sent can call back into this file (counts, windows); a send
+        -- made from there only queues, so an answer and its players-seen count keep their order
+        if C.pumpBusy then return end
+        C.pumpBusy = true
+        local ok, err = pcall(function()
+            local t = now()
+            C.tokens = math.min(C.burst, C.tokens + (t - C.filled) / SEND_EVERY)
+            C.filled = t
+            while C.tokens >= 1 and queue[1] do
+                local item = table.remove(queue, 1)
+                C.tokens = C.tokens - 1
+                net:Noted(item.to)
+                local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
+                local k = (result == nil or result == true or result == 0) and "sent" or result == 12 and "offline" or "refused"
+                traffic[k] = traffic[k] + 1
+                net:Sent(item.to, result)
+            end
+        end)
+        C.pumpBusy = false
+        if not ok and geterrorhandler then geterrorhandler()(err) end   -- shown like any Lua error (Sol), never stuck
+        if not queue[1] and pumping then pumping:Cancel(); pumping = nil end
+    end
+    -- runs the queue now, then keeps a short ticker going only while something waits for a token
+    function C._kick()
+        if pumping then return end
+        pump()
+        if queue[1] and not pumping then pumping = C_Timer.NewTicker(0.25, pump) end
     end
     local function send(msg, to, urgent)
         if not to or to == me or #queue >= QUEUE_MAX then return end
         local item = { msg = msg, to = to }
         if urgent then table.insert(queue, 1, item) else queue[#queue + 1] = item end
-        if not pumping then
-            pump()
-            pumping = C_Timer.NewTicker(SEND_EVERY, pump)
-        end
+        C._kick()
     end
     local function sendAll(msg, list, urgent) for _, n in ipairs(list) do send(msg, n, urgent) end end
     -- urgent messages that must arrive in THIS order (a census answer, then its players-seen count):
@@ -238,10 +258,7 @@ function ns.LayerCoreBuild(owner)
     local function sendFirst(msgs, to)
         if not to or to == me or #queue + #msgs > QUEUE_MAX then return end
         for i = #msgs, 1, -1 do table.insert(queue, 1, { msg = msgs[i], to = to }) end
-        if not pumping then
-            pump()
-            pumping = C_Timer.NewTicker(SEND_EVERY, pump)
-        end
+        C._kick()
     end
 
     local function isPeer(name)
