@@ -220,6 +220,8 @@ SlashCmdList["VOIDQUEST"] = function(msg)
         VoidQuest.QuestItemDebug()
     elseif msg == "leftovers" and VoidQuest.LeftoversList then   -- quest items nothing needs anymore
         VoidQuest.LeftoversList()
+    elseif msg == "atlas" and VoidQuest.MobAtlas then   -- every mob seen and killed (WoW Forever)
+        VoidQuest.MobAtlas:Report()
     elseif msg == "dots" and VoidQuest.Mobs then   -- minimap dots for the tracked quest's mobs on / off
         VoidQuest.Mobs:Toggle()
     elseif msg == "drops" and VoidQuest.Drops then   -- where your quests' items have come from

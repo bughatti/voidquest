@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.37 — 2026-11-17
+
+- **VoidNet: one hidden channel for every Void addon (WoW Forever).** VoidLayer, VoidSweep, VoidQuest, VoidGather, VoidBounty and VoidDungeon now share ONE channel instead of one each. The Void players box shows **VoidNet** (every Void addon player online, each counted once) with **Layer helpers** under it. Players on an older version are still reached through the old channel, which goes away 30 days after the last of them updates.
+- **Harder to grief:** the channel name changes every hour, with backups. If someone takes the channel over, bans or kicks Void players, or changes its password, every Void addon moves to the backup and ignores that player for 24 hours (a report from others counts only when 3 different Void players saw it). Nothing is shown as a list of names.
+- **You can now help other players change layer** (WoW Forever): when a Void player on your layer asks, you send them a quick group invite, only while you're solo and out of combat. A short pop-up says so once. Don't want it? Turn it off with a checkbox at the bottom of VoidQuest's settings (the same switch for every Void addon).
+- **Record the mobs you see (WoW Forever):** VoidQuest keeps every mob you see or kill in the open world: its name, level, where you stood closest to it, and your kills. It stays on your computer; `/vq atlas` shows it. It's used to check quest data. Turn it off in settings (Guidance).
+- **Void windows open in front** of other windows and come forward when you click them; only one first-time pop-up shows at a time.
+
 ## 0.3.36 — 2026-11-16
 
 - **WoW Forever: a quest item you'll need later says so.** Hover it and VoidQuest tells you the quest it's for, its level, who gives it and where, and whether you can take it yet ("Needs level 35 (you're 30)", "First: ...", or "You can take it now").

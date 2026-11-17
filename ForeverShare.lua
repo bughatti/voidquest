@@ -44,6 +44,7 @@
 -- tools/cmd/vq-seed bundles the confirmed ones (n >= 2) into ForeverSeed.lua.
 ----------------------------------------------------------------------
 local VQ = VoidQuest
+local _, VQNS = ...   -- VoidQuest's own namespace: its copies of WhisperNet and VoidNet (2026-11-17)
 -- "n123" -> 123; nil for an object ("o456") or a spot ("e2932")
 local function npcOf(key) local s = type(key) == "string" and key:match("^n(%d+)$") return s and tonumber(s) or nil end
 if not VQ.ForeverQuests then return end   -- WoW Forever only (retail has Blizzard's own pins)
@@ -279,6 +280,13 @@ end
 -- The "Players online" box (PresenceBox.lua, shared with VoidGather / VoidSweep).
 local function publish()
     if not _G.VoidPresence then return end
+    if Share.vn then
+        -- the one channel: "VoidNet" in the box (sharing off: left to another Void addon)
+        if not enabled() then return end
+        local void = Share.vn:Void()
+        VoidPresence:Set("VoidNet", "VoidNet", void or 0, false, void ~= nil, blockReason() and "blocked" or nil)
+        return
+    end
     local gone = 0
     if (memberCount or 0) > ROSTER_MAX then
         -- only a window of the list is read: count the recent marks
@@ -288,8 +296,12 @@ local function publish()
         for _, name in ipairs(roster) do if unreach[name:lower()] then gone = gone + 1 end end
     end
     local others = memberCount and math.max(0, memberCount - 1 - gone)
-    local note = enabled() and blockReason() and "blocked" or nil
-    VoidPresence:Set("VoidQuest", "VoidQuest online", others or 0, false, enabled() and others ~= nil, note)
+    -- this channel is VoidNet: the one channel every Void addon shares (2026-11-17, the user: "VoidNet" in the
+    -- box, then "Layer helpers"; the old "VoidQuest online" line counted the same channel). With sharing off we
+    -- leave the line to another Void addon rather than blank it.
+    if not enabled() then return end
+    local note = blockReason() and "blocked" or nil
+    VoidPresence:Set("VoidNet", "VoidNet", others or 0, false, others ~= nil, note)
 end
 
 local function readRoster()
@@ -345,6 +357,7 @@ end
 -- Left alone while the Channels window is open, so we never change what you're looking at.
 local waitingTurn
 local function requestRoster()
+    if Share.vn then Share.vn:RequestRoster() return end   -- the one channel (VoidNet) reads it
     if waitingTurn or GetTime() - rosterAt < ROSTER_EVERY then return end
     if not displayIndex() then return end   -- not in the channel yet: try again next time
     waitingTurn = true
@@ -364,6 +377,8 @@ end
 
 -- Up to k random members we can reach.
 local function pick(k)
+    -- the one channel (VoidNet, 2026-11-17): VoidQuest users first, the swarm's peers too
+    if Share.vn then return Share.vn:Pick(k) end
     local live = {}
     for _, name in ipairs(roster) do if reachable(name) then live[#live + 1] = name end end
     local n, out, used = #live, {}, {}
@@ -421,7 +436,9 @@ local function pump()
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
         local key, at = item.to:lower(), time()
         whispered[key] = GetTime()   -- bounce matching (HIDE_FOR) runs on GetTime
+        if Share.vn then Share.vn:Noted(item.to) end
         local result = C_ChatInfo.SendAddonMessage(PREFIX, item.msg, "WHISPER", item.to)
+        if Share.vn then Share.vn:Sent(item.to, result) end
         tally(sendResult(result), item.msg)
         -- Enum.SendAddonMessageResult: 0 = Success, 12 = TargetOffline (older clients: nil/true).
         -- Only a send the game accepted can prove a marked player is back.
@@ -1411,6 +1428,12 @@ end)
 
 function Share:JoinNet()
     if not netOn() then return end
+    -- the one channel (VoidNet): joins it and keeps VoidQuest's old daily channel for older versions
+    if Share.vn then
+        Share.vn:Join()
+        C_Timer.After(5, publish)
+        return
+    end
     -- out of the old channels first, so their slots are free for the new one (Codex review).
     -- A banned one can't be left; it goes at logout.
     if not chatLocked() then
@@ -1485,7 +1508,7 @@ function Share:Apply()
         -- the channel stays while another Void addon still shares over it
         if netOn() then
             self:JoinNet()
-        elseif netIndex() then
+        elseif netIndex() and not Share.vn then   -- the one channel stays: other Void addons use it
             LeaveChannelByName(CHANNEL_NAME)
         end
     end
@@ -1619,6 +1642,13 @@ function Share:Init()
     VoidQuestDB = VoidQuestDB or {}
     VoidQuestDB.netOffline = nil
     unreach = {}
+    -- the one channel for every Void addon (VoidNet.lua, 2026-11-17): VoidQuest's daily channel ("Vq")
+    -- becomes its old channel, kept 30 days after the last player on an older version
+    if VQNS and VQNS.VoidNet and VQNS.WhisperNet then
+        Share.vn = VQNS.VoidNet.New({ prefix = PREFIX, legacy = { tag = DAILY_TAG, salt = DAILY_SALT },
+                                      db = VoidQuestDB, onRoster = publish })
+        CHANNEL_NAME = Share.vn:Channel()
+    end
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     end
@@ -1670,13 +1700,16 @@ function Share:Init()
             if prefix ~= PREFIX or type(sender) ~= "string" or sender == "" then return end
             -- whispers; or our channel, should Blizzard let channel addon messages through again
             local idx = netIndex()
+            -- a hostile player (VoidNet's marks): dropped; a member: known as a VoidQuest user
+            if Share.vn and Share.vn:Heard(canon(sender)) == false then return end
             if channel == "WHISPER" then
                 Share:OnMessage(msg, canon(sender), sender)
             elseif channel == "CHANNEL" and idx and localID == idx then
                 Share:OnMessage(msg, canon(sender), sender)
             end
         elseif event == "CHANNEL_ROSTER_UPDATE" then
-            if prefix == displayIndex() then readRoster() end   -- arg1 = the channel's display index
+            -- arg1 = the channel's display index (VoidNet reads the one channel itself)
+            if not Share.vn and prefix == displayIndex() then readRoster() end
         else
             flush()   -- finds from the map you just left go out now
             askHere()
@@ -1704,6 +1737,11 @@ function Share:Init()
     end)
     -- at 00:00 UTC everyone moves to the new day's channel together
     C_Timer.NewTicker(60, function()
+        if Share.vn then
+            -- VoidNet follows the hour's channel and drops VoidQuest's old one when it's time
+            if Share.vn:Day() then CHANNEL_NAME = Share.vn:Channel(); refusedAs = nil; publish() end
+            return
+        end
         local name, pw = dailyChannel()
         if name == CHANNEL_NAME then return end
         local old = CHANNEL_NAME

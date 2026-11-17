@@ -25,6 +25,7 @@ VQ.SettingsDefaults = {
     minimapShow = true, announceActions = false, blizzTracker = true,
     share = true,   -- WoW Forever: share quest-giver spots with other VoidQuest players (ForeverShare.lua)
     mobLoot = true, -- "Loot: yours / someone else's" on mob tooltips (MobLoot.lua)
+    mobAtlas = true, -- WoW Forever: record every mob seen and killed (MobAtlas.lua, /vq atlas)
 }
 
 function VQ:Get(key)
@@ -183,6 +184,9 @@ function mod:EnsurePanel()
     if VQ.MobLoot then   -- (WoW Forever only for now: MobLoot.lua returns early on retail)
         makeCheck(f, x, y, "Whose loot on mob tooltips", "mobLoot", "A line on a mob's tooltip: yours, your group's (and the loot rule), someone else's, or free. On a corpse: whether you can loot it."); y = y - 24
     end
+    if VQ.MobAtlas then   -- (WoW Forever only)
+        makeCheck(f, x, y, "Record the mobs you see", "mobAtlas", "Keeps every mob you see or kill: name, level, where (where you stood closest to it), and your kills. Stays on your computer; /vq atlas shows it. Used to check quest data."); y = y - 24
+    end
     -- WoW Forever has its own tier (foreverDensity, Chains.lua C:InScope)
     makeSegment(f, x, y, "Density", VQ.ForeverQuests and "foreverDensity" or "density", { { val = "min", text = "Min" }, { val = "mid", text = "Mid" }, { val = "max", text = "Max" } }); y = y - 26
     makeSegment(f, x, y, "Zone order", "zoneOrder", { { val = "nearest", text = "Nearest" }, { val = "grouped", text = "Grouped" } }); y = y - 28
@@ -216,6 +220,20 @@ function mod:EnsurePanel()
         makeCheck(f, x, y, "Let VoidQuest players on your quest ask you to group", "groupAsks", "Another VoidQuest player in your zone on the same quest can Ctrl-click it to ask you to group, and you count toward the grey players-here number on their quest lines (only VoidQuest players in your zone see which quests you have, never your name): you get a pop-up with their name, level and class, and Accept or No thanks. Accept takes their invite. No thanks (or no answer in 5 minutes) means you are never asked about that quest again. You are only asked when you are solo, out of combat and outside instances, at most once every 3 minutes."); y = y - 24
         makeCheck(f, x, y, "Say when VoidQuest players here share your quests", "groupArrival", "Arriving in a zone, one chat line when other VoidQuest players there are on your quests (\"3 VoidQuest players in The Barrens are on 2 of your quests\"), at most once per zone every 30 minutes. The numbers stay on the quest lines either way."); y = y - 24
         f:SetHeight(922)
+        -- "Help others change layer": ONE switch for every Void addon (LayerHelp.lua); the hub has the same one
+        local LH = rawget(_G, "VoidLayerHelp")
+        if LH and rawget(_G, "VoidLayerCore") then
+            local cb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+            cb:SetSize(24, 24); cb:SetPoint("TOPLEFT", x, y)
+            cb.text = cb:CreateFontString(nil, "OVERLAY"); VQ:SetFont(cb.text, 11)
+            cb.text:SetPoint("LEFT", cb, "RIGHT", 2, 0); cb.text:SetText(LH.LABEL)
+            cb:SetChecked(LH.On())
+            cb:SetScript("OnClick", function(s) LH.Set(s:GetChecked() and true or false) end)
+            tip(cb, LH.LABEL, LH.TIP)
+            f._sync[#f._sync + 1] = function() cb:SetChecked(LH.On()) end
+            y = y - 24
+            f:SetHeight(946)
+        end
     end
 
     f:Hide()   -- created hidden so the FIRST click opens it (CreateFrame shows by default)

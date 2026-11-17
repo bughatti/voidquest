@@ -87,7 +87,7 @@ function G.Parse(lines)
     return quests
 end
 
--- me = { full = "Vede Tinkerline", short = "Vede" } (either may be nil); classOf(name) -> "ROGUE"
+-- me = { full = "Ana Brightwood", short = "Ana" } (either may be nil); classOf(name) -> "ROGUE"
 -- groupSize = members in the group (incl. you) for "everyone"; colorOf(class) -> "ffrrggbb" or nil.
 -- Returns lines { left, right, lr, lg, lb } for AddDoubleLine / AddLine (right nil).
 function G.Build(quests, me, classOf, groupSize, colorOf)

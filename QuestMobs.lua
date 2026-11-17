@@ -566,6 +566,7 @@ local function HowNear(unit)
     if ok and r == true then return 28 end
     return 60   -- nameplate range
 end
+M.HowNear = HowNear   -- (MobAtlas.lua: the same closest-spot range checks for every mob)
 
 -- learn the best spot once; the entry stays (learned) until the nameplate goes or 30 s pass, so a
 -- later, farther look can't start over and replace it (Sol review)

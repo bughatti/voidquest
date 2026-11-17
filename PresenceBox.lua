@@ -182,7 +182,14 @@ function P:Update()
     box = box or build()
     local names = {}
     for addon in pairs(self.lines) do names[#names + 1] = addon end
-    table.sort(names)
+    -- "VoidNet" (everyone on the one channel) first, "Layer helpers" (VoidLayer's line) under it, the rest A-Z
+    -- (the user, 2026-11-17)
+    local FIRST = { VoidNet = 1, VoidLayer = 2 }
+    table.sort(names, function(a, b)
+        local fa, fb = FIRST[a] or 9, FIRST[b] or 9
+        if fa ~= fb then return fa < fb end
+        return a < b
+    end)
     local width = box.title:GetStringWidth() + 16
     for i, addon in ipairs(names) do
         local l = self.lines[addon]
