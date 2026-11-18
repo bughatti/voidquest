@@ -228,9 +228,13 @@ end
 -- Every player already has the shipped seed (VoidQuest.ForeverSeed, VoidDB-backed since
 -- 0.3.0): a find it already holds isn't sent. Addon messages are small and throttled, so only
 -- gaps and real corrections (the giver somewhere else) go out (the user, 2026-11-06).
+-- A shipped giver still from the credited databases (ext = 1, tools/cmd/vq-seed) doesn't count: your find
+-- goes out, and 2+ players make it our own data at the next release (the user, 2026-11-18: "as soon as a
+-- player validates something we got somewhere else we now own that data via crowdsourcing").
 local function seedHas(q, s)
     local d = q and VQ.ForeverSeed and VQ.ForeverSeed[q]
     if not (d and d.m and d.x and d.y) or d.m ~= s.m then return false end
+    if d.ext then return false end
     -- same NPC too: a different giver at the same spot is a correction worth sending (Codex review)
     if d.giver and s.npc and d.giver ~= s.npc then return false end
     return math.abs(d.x - s.x) < 0.03 and math.abs(d.y - s.y) < 0.03
@@ -646,7 +650,14 @@ local function scheduleRefresh()
     end)
 end
 
--- Add one report. Returns true when it made a spot confirmed (usable) for the first time.
+-- What an incoming entry brought (the user, 2026-11-18: "is there a way to tell the difference
+-- between new data or new players asking for data we already have"): counted per message type in
+-- netStats as in_new (we had nothing there), in_vote (one more player backing a spot not settled
+-- yet) or in_had (we have it already: our own, settled, or the same player again). /vq net, /vdnet.
+local function brought(status, tag) tally("in_" .. status, tag) end
+
+-- Add one report. Returns true when it made a spot confirmed (usable) for the first time,
+-- and what it brought ("new", "vote" or "had").
 local function addReport(qid, npcID, mapID, x, y, name, hash)
     VoidQuestDB.heard = VoidQuestDB.heard or {}
     local list = VoidQuestDB.heard[qid]
@@ -657,14 +668,14 @@ local function addReport(qid, npcID, mapID, x, y, name, hash)
         if c.id == npcID and c.npc == name and c.m == mapID
             and math.abs(c.x - x) <= NEAR and math.abs(c.y - y) <= NEAR then
             c.t = time()                          -- still being reported: keep it
-            if c.v[hash] then return false end   -- same player again
-            if c.n >= VOTES_KEPT then return false end   -- settled
+            if c.v[hash] then return false, "had" end   -- same player again
+            if c.n >= VOTES_KEPT then return false, "had" end   -- settled
             c.v[hash] = true
             -- average the spots, so the pin settles on where people actually stand
             c.x = (c.x * c.n + x) / (c.n + 1)
             c.y = (c.y * c.n + y) / (c.n + 1)
             c.n = c.n + 1
-            return c.n == CONFIRM
+            return c.n == CONFIRM, "vote"
         end
     end
     if #list >= CANDIDATES then
@@ -681,16 +692,17 @@ local function addReport(qid, npcID, mapID, x, y, name, hash)
                 if time() - (c.t or 0) > STALE and (not victim or (c.t or 0) < (list[victim].t or 0)) then victim = i end
             end
         end
-        if not victim then return false end
+        if not victim then return false, "full" end   -- no room: we never knew it (Sol)
         table.remove(list, victim)
     end
     list[#list + 1] = { m = mapID, x = x, y = y, npc = name, id = npcID, n = 1, v = { [hash] = true }, t = time() }
-    return false
+    return false, "new"
 end
 
 local swFeed   -- (the swarm bridge, below): an old-format report also counts as a vote in the swarm
-local function takeEntries(mapID, body, sender, hashIn, fromSwarm)
+local function takeEntries(mapID, body, sender, hashIn, fromSwarm, tag)
     local hash, changed, n = hashIn or senderHash(sender), false, 0
+    tag = fromSwarm and "swarm" or tag or "B"
     for entry in body:gmatch("[^;]+") do
         n = n + 1
         if n > ENTRIES_MAX then break end
@@ -702,8 +714,12 @@ local function takeEntries(mapID, body, sender, hashIn, fromSwarm)
             if x > 0 and x < 1 and y > 0 and y < 1 then
                 -- your own find for this quest already wins; don't collect votes on it
                 local own = VoidQuestDB.starts and VoidQuestDB.starts[qid]
-                if not (own and own.how == "npc") and addReport(qid, npcID, mapID, x, y, name, hash) then
-                    changed = true
+                if own and own.how == "npc" then
+                    brought("had", tag)
+                else
+                    local confirmed, what = addReport(qid, npcID, mapID, x, y, name, hash)
+                    brought(what, tag)
+                    if confirmed then changed = true end
                 end
                 if not fromSwarm and swFeed then swFeed("q", mapID, tostring(qid), ("%d,%s,%s,%s"):format(npcID, xs, ys, name), hash) end
             end
@@ -748,10 +764,19 @@ end
 
 local function near(ax, ay, bx, by) return math.abs(ax - bx) <= MOB_NEAR and math.abs(ay - by) <= MOB_NEAR end
 
--- the shipped data already has this mob close to here
-local function seedMobNear(npc, mapID, x, y)
+-- The shipped data already has this mob close to here AS OUR OWN spot (the user, 2026-11-18: "as soon as
+-- a player validates something we got somewhere else we now own that data via crowdsourcing"). Points
+-- still from the credited databases (after the first ForeverSpawnsOurs[key][map] of the string) don't
+-- count: a sighting there is sent, and 2+ players make it ours at the next release (tools/cmd/forever-mobs).
+-- any = true: any shipped point, ours or not.
+local function seedMobNear(npc, mapID, x, y, any)
     local s = VQ.ForeverSpawns and VQ.ForeverSpawns["n" .. npc]
     local pts = s and s[mapID]
+    if not any then
+        local o = VQ.ForeverSpawnsOurs and VQ.ForeverSpawnsOurs["n" .. npc]
+        local nOurs = o and tonumber(o[mapID]) or 0
+        pts = pts and pts:sub(1, nOurs * 6)
+    end
     for i = 1, #(pts or "") - 5, 6 do
         local px, py = tonumber(pts:sub(i, i + 2)), tonumber(pts:sub(i + 3, i + 5))
         if px and py and near(px, py, x, y) then return true end
@@ -887,6 +912,7 @@ end
 local function takeMobs(mapID, body, sender, hashIn, fromSwarm)
     local heard = mobDB()
     local hash, n, changed = hashIn or senderHash(sender), 0, false
+    local tag = fromSwarm and "swarm" or "M"
     for entry in body:gmatch("[^;]+") do
         n = n + 1
         if n > ENTRIES_MAX then break end
@@ -905,6 +931,7 @@ local function takeMobs(mapID, body, sender, hashIn, fromSwarm)
                 mobCount = mobCount + 1
             end
             mob.t = time()   -- last reported (eviction goes by it)
+            local what = "had"   -- what this entry brought: "new" beats "vote" beats "had"
             local list = mob.s[mapID] or {}
             mob.s[mapID] = list
             local hit
@@ -913,12 +940,17 @@ local function takeMobs(mapID, body, sender, hashIn, fromSwarm)
                 hit.t = time()
                 local was = hit.n
                 if vote(hit, hash) then changed = true end
+                -- one more player at a spot the shipped data has is still nothing new (Sol)
+                if hit.n > was and not seedMobNear(npc, mapID, x, y) then what = "vote" end
                 if hit.n > was then   -- average: the dot settles where the mobs are
                     hit.x = math.floor((hit.x * was + x) / hit.n + 0.5)
                     hit.y = math.floor((hit.y * was + y) / hit.n + 0.5)
                 end
             elseif #list < MOB_SPOTS or makeRoom(list, true) then
                 list[#list + 1] = { x = x, y = y, n = 1, v = { [hash] = true }, t = time() }
+                what = seedMobNear(npc, mapID, x, y) and "had" or "new"
+            else
+                what = "full"   -- no room: not "had", we never knew it (Sol)
             end
             if q and not seedLinks(npc, q) then
                 local l = mob.q[q]
@@ -932,9 +964,15 @@ local function takeMobs(mapID, body, sender, hashIn, fromSwarm)
                 end
                 if l then
                     l.t = time()
+                    local was = l.n
                     if vote(l, hash) then changed = true end
+                    -- a new quest link is new even when the spot only got a vote (Sol): new > vote > had
+                    if l.n > was then
+                        if was == 0 then what = "new" elseif what ~= "new" then what = "vote" end
+                    end
                 end
             end
+            brought(what, tag)
         end
     end
     if changed and VQ.Mobs and VQ.Mobs.Refresh then VQ.Mobs:Refresh() end
@@ -989,7 +1027,21 @@ end
 -- quest titles mapped to IDs by Forever's quest list (unique titles only). FoundMob's own rules
 -- apply: only what the shipped data lacks, held back, not twice.
 function Share:BackfillMobs()
-    if not (enabled() and VoidQuestDB and VoidQuestDB.seenMobs) or VoidQuestDB.mobBackfilled then return end
+    if not (enabled() and VoidQuestDB and VoidQuestDB.seenMobs) then return end
+    -- 2026-11-18, once: sightings near a shipped spot were never sent; now one near a spot that is
+    -- still outside-sourced helps make it ours. A player who backfilled before goes over them again,
+    -- only those (the gaps went out the first time).
+    if not VoidQuestDB.mobBackOwn and not VoidQuestDB.mobOwnPass then
+        if VoidQuestDB.mobBackfilled then
+            VoidQuestDB.mobBackfilled, VoidQuestDB.mobBackDone, VoidQuestDB.mobOwnPass = nil, {}, true
+        elseif VoidQuestDB.mobBackDone and next(VoidQuestDB.mobBackDone) then
+            -- an old backfill stopped half-way (queue full): what it marked done includes shipped spots
+            -- it skipped. Finish it, then do the pass for those (Sol review).
+            VoidQuestDB.mobOwnAfter = true
+        end
+    end
+    if VoidQuestDB.mobBackfilled then return end
+    local ownPass = VoidQuestDB.mobOwnPass
     local byTitle, dup = {}, {}
     for q, r in pairs(VQ.ForeverQuests) do
         local t = type(r) == "table" and r[1]
@@ -1023,7 +1075,9 @@ function Share:BackfillMobs()
                         for _, q in ipairs(#qids == 0 and { 0 } or qids) do
                             local key = npc .. ":" .. map .. ":" .. x .. ":" .. y .. ":" .. q
                             if not done[key] then
-                                if self:FoundMob(npc, map, x, y, q, true) == "full" then full = true else done[key] = true end
+                                if ownPass and not seedMobNear(npc, map, x, y, true) then
+                                    done[key] = true   -- a gap: it went out the first time
+                                elseif self:FoundMob(npc, map, x, y, q, true) == "full" then full = true else done[key] = true end
                             end
                         end
                         n = n + 1
@@ -1033,7 +1087,14 @@ function Share:BackfillMobs()
         end
     end
     -- the queue filled up: try again next login (what went in stays; nothing is queued twice)
-    if not full then VoidQuestDB.mobBackfilled, VoidQuestDB.mobBackDone = true, nil end
+    if not full then
+        if VoidQuestDB.mobOwnAfter then   -- the old half-done pass is finished: the outside spots next login
+            VoidQuestDB.mobOwnAfter, VoidQuestDB.mobBackDone, VoidQuestDB.mobOwnPass = nil, {}, true
+        else
+            VoidQuestDB.mobBackfilled, VoidQuestDB.mobBackDone = true, nil
+            VoidQuestDB.mobBackOwn, VoidQuestDB.mobOwnPass = true, nil
+        end
+    end
     return n
 end
 
@@ -1261,8 +1322,9 @@ local function takeFact(qid, body, sender, hashIn, fromSwarm)
     local voters = q[field .. "v"] or {}
     q[field .. "v"] = voters
     local h = hashIn or senderHash(sender)
+    local tag = fromSwarm and "swarm" or "F"
     if not fromSwarm and swFeed then swFeed("f", tostring(qid % 64), qid .. "/" .. field, value, h) end
-    if voters[h] then return end   -- this player already voted on this quest's field
+    if voters[h] then brought("had", tag); return end   -- this player already voted on this quest's field
     local byVal = q[field] or {}
     q[field] = byVal
     local c = byVal[value]
@@ -1273,13 +1335,14 @@ local function takeFact(qid, body, sender, hashIn, fromSwarm)
             if cc.n < CONFIRM and (not weakest or cc.n < byVal[weakest].n) then weakest = v end
         end
         if count >= FACT_VALUES then
-            if not weakest then return end   -- every value is backed by 2+ players: keep them
+            if not weakest then brought("full", tag); return end   -- every value is backed by 2+ players: keep them
             byVal[weakest] = nil
         end
         c = { n = 0, v = {} }
         byVal[value] = c
     end
-    if c.n >= VOTES_KEPT then return end
+    if c.n >= VOTES_KEPT then brought("had", tag); return end
+    brought(c.n == 0 and "new" or "vote", tag)
     voters[h] = true
     c.v[h], c.n = true, c.n + 1
 end
@@ -1381,6 +1444,7 @@ function Share:OnMessage(msg, sender, replyTo)
         if lastAnyReply and now - lastAnyReply < ANSWER_EVERY then return end
         local own = ownOn(mapID)
         if #own == 0 or not replyTo then tally("unanswered", "nothing new"); return end
+        tally("answered", "Q")
         lastReply[key], lastReplyTo[sender], lastAnyReply = now, now, now
         local gen = Share.gen
         C_Timer.After(1 + math.random() * 3, function()
@@ -1388,7 +1452,7 @@ function Share:OnMessage(msg, sender, replyTo)
             if enabled() and Share.gen == gen then sendEntries("B", mapID, own, { replyTo }) end
         end)
     elseif tag == "B" or tag == "N" then
-        takeEntries(mapID, body, sender)
+        takeEntries(mapID, body, sender, nil, nil, tag)
     elseif tag == "M" then
         takeMobs(mapID, body, sender)
     end
@@ -1467,6 +1531,25 @@ local function askHere()
     if mapID then Share:Ask(mapID) end
 end
 
+-- 2026-11-18, once: givers you found before at a spot the shipped data has from the credited databases
+-- were never sent (seedHas said "everyone has it"). Now they help make it ours. Old finds, not where you
+-- are now, so a short spread instead of the privacy hold; ownSend keeps them over a /reload until sent.
+function Share:BackfillGivers()
+    if not (enabled() and VoidQuestDB and VoidQuestDB.starts) or VoidQuestDB.giverBackOwn then return 0 end
+    local n = 0
+    for q, s in pairs(VoidQuestDB.starts) do
+        local d = type(q) == "number" and VQ.ForeverSeed and VQ.ForeverSeed[q]
+        if d and d.ext and type(s) == "table" and shareable(s) and not s.sent and not pending[q] then
+            s.ownSend = true
+            pending[q] = GetTime() + 60 + math.random() * 600
+            n = n + 1
+        end
+    end
+    VoidQuestDB.giverBackOwn = true
+    if next(pending) and not pendingTicker then pendingTicker = C_Timer.NewTicker(60, flush) end
+    return n
+end
+
 -- Finds still within their hold (found before a /reload, or while sharing was off): hold
 -- them for the rest of their time, then send.
 function Share:RestoreHeld()
@@ -1474,6 +1557,8 @@ function Share:RestoreHeld()
     for q, s in pairs(VoidQuestDB and VoidQuestDB.starts or {}) do
         if type(q) == "number" and type(s) == "table" and shareable(s) and fresh(s) and not pending[q] then
             pending[q] = GetTime() + math.max(60, HOLD_MAX - (time() - s.t))
+        elseif type(q) == "number" and type(s) == "table" and s.ownSend and not s.sent and shareable(s) and not pending[q] then
+            pending[q] = GetTime() + 60 + math.random() * 600   -- an old find going out to make a spot ours
         end
     end
     if next(pending) and not pendingTicker then pendingTicker = C_Timer.NewTicker(60, flush) end
@@ -1723,6 +1808,7 @@ function Share:Init()
     Share:RestoreHeld()
     Share:RestoreMobs()   -- mob spots still held from before a /reload
     C_Timer.After(30, function() pcall(Share.BackfillMobs, Share) end)   -- once: sightings from before sharing
+    C_Timer.After(40, function() pcall(Share.BackfillGivers, Share) end)  -- once: givers at outside-sourced spots
     -- facts still waiting from before a /reload
     for _, e in pairs(VoidQuestDB.facts and VoidQuestDB.facts.own or {}) do
         if (e.i and not (e.sent and e.sent.i)) or (e.p and not (e.sent and e.sent.p)) then
@@ -1832,6 +1918,8 @@ function Share:Stats()
         VQ:Print(("Traffic since %s -- sent: %s | received: %s | not sent, nobody online: %s | offline: %s | refused: %s | dropped: %s | questions with nothing new to answer: %s | old format held back: %s"):format(
             date("%b %d %H:%M", s.since), list(s.sent), list(s.got), list(s.nobody), list(s.offline), list(s.refused),
             list(s.dropped), list(s.unanswered), list(s.held)))
+        VQ:Print(("What came in -- new to us: %s | backing a spot not settled yet: %s | already had: %s | questions answered: %s"):format(
+            list(s.in_new), list(s.in_vote), list(s.in_had), list(s.answered)))
     end
     if self.legacy then VQ:Print(self.legacy:Line()) end
 end

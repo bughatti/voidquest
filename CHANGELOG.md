@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.3.39 — 2026-11-18
+
+- **Quest mob spots and quest givers measured by Void players (WoW Forever).** VoidQuest now also shares, once each, the quest givers and mob spots the shipped data has but Void players haven't confirmed yet. Once two players agree, VoidDB ships the spot they measured. This version already ships over 2,400 measured mob spots and turn-in spots recorded at the quest window.
+- Quest data updated: more quest givers, turn-ins, levels and mob spots.
+- `/vq net` also says what came in from other players: new to you, backing a spot that isn't settled yet, or already known; and how many questions you answered.
+
 ## 0.3.38 — 2026-11-17
 
 - **Layer helping finds players faster (WoW Forever).** A layer question now reaches the Void players it asks in about a second instead of eleven, so Refresh and hops see the other layers right away. Same message rate over time, well under the game's limit.
