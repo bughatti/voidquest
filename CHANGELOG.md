@@ -3,7 +3,7 @@
 ## 0.3.39 — 2026-11-18
 
 - **Quest mob spots and quest givers measured by Void players (WoW Forever).** VoidQuest now also shares, once each, the quest givers and mob spots the shipped data has but Void players haven't confirmed yet. Once two players agree, VoidDB ships the spot they measured. This version already ships over 2,400 measured mob spots and turn-in spots recorded at the quest window.
-- Quest data updated: more quest givers, turn-ins, levels and mob spots.
+- Quest data updated: more quest givers, turn-ins, levels and mob spots, and the reputation players saw quests give (2+ players).
 - `/vq net` also says what came in from other players: new to you, backing a spot that isn't settled yet, or already known; and how many questions you answered.
 
 ## 0.3.38 — 2026-11-17
