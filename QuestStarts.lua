@@ -42,7 +42,7 @@ function S:Get(qid)
     local s = Seed(qid)
     if s and s.m then return { m = s.m, x = s.x, y = s.y, how = s.how } end
     local h = Heard(qid)
-    if h then return { m = h.m, x = h.x, y = h.y, how = "npc", shared = true } end
+    if h then return { m = h.m, x = h.x, y = h.y, how = (h.id == 0) and "object" or "npc", shared = true } end   -- id 0: an object
 end
 
 -- Who gives / takes a quest: learned names (CampaignGuide's npcs table, this file's
@@ -106,6 +106,9 @@ local function Learn(qid)
     -- sharing was on at the time, so turning sharing on later can't give it away early.
     VoidQuestDB.starts[qid] = { m = m, x = x, y = y, how = how, npc = npc, id = id, t = time() }
     if VQ.Share and how == "npc" then VQ.Share:Found({ qid }) end
+    -- an object start goes out too (2026-11-18), once the quest window has given its name (CampaignGuide's
+    -- npcs[q].giver, written around the same accept): a moment later
+    if VQ.Share and how == "object" then C_Timer.After(3, function() VQ.Share:Found({ qid }) end) end
 end
 
 -- WoW Forever: the quests an NPC OFFERS are saved too (not only the ones you take), at

@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.40 — 2026-11-18
+
+- **Quests that start from an object are shared too (WoW Forever).** A pylon, a wanted poster or a book that gives a quest was only learned by the player who found it. Now it reaches other VoidQuest players like a quest giver does, so new quests (like the ones in Shen'dralas) fill in faster for everyone.
+- **Strange Pylons** (Shen'dralas) now has its "!" at the Shen'dralar Pylon.
+
 ## 0.3.39 — 2026-11-18
 
 - **Quest mob spots and quest givers measured by Void players (WoW Forever).** VoidQuest now also shares, once each, the quest givers and mob spots the shipped data has but Void players haven't confirmed yet. Once two players agree, VoidDB ships the spot they measured. This version already ships over 2,400 measured mob spots and turn-in spots recorded at the quest window.

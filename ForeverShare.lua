@@ -220,9 +220,19 @@ local function fresh(s)
 end
 
 -- Only quests with a real NPC giver and a spot are shared (never "auto"/object starts).
-local function shareable(s)
-    return s and s.how == "npc" and s.id and s.npc and s.m and s.x and s.y
-        and s.x > 0 and s.x < 1 and s.y > 0 and s.y < 1
+-- A quest that starts from an OBJECT (the user, 2026-11-18, at a Shen'dralar Pylon in the new Shen'dralas: object
+-- starts were never shared, so a new object quest only reached the data through the author's own play). Its name
+-- is what the quest window showed (VoidQuestDB.npcs[q].giver, CampaignGuide), its "NPC ID" 0 on the wire.
+local function startName(q, s)
+    if s and s.npc then return s.npc end
+    local n = q and VoidQuestDB and VoidQuestDB.npcs and VoidQuestDB.npcs[q]
+    return n and n.giver or nil
+end
+
+local function shareable(s, q)
+    if not (s and s.m and s.x and s.y and s.x > 0 and s.x < 1 and s.y > 0 and s.y < 1) then return false end
+    if s.how == "npc" then return s.id and s.npc and true or false end
+    return s.how == "object" and startName(q, s) ~= nil
 end
 
 -- Every player already has the shipped seed (VoidQuest.ForeverSeed, VoidDB-backed since
@@ -236,14 +246,15 @@ local function seedHas(q, s)
     if not (d and d.m and d.x and d.y) or d.m ~= s.m then return false end
     if d.ext then return false end
     -- same NPC too: a different giver at the same spot is a correction worth sending (Codex review)
-    if d.giver and s.npc and d.giver ~= s.npc then return false end
+    local name = startName(q, s)
+    if d.giver and name and d.giver ~= name then return false end
     return math.abs(d.x - s.x) < 0.03 and math.abs(d.y - s.y) < 0.03
 end
 
 local function encode(qid, s)
-    local name = cleanName(s.npc)
+    local name = cleanName(startName(qid, s))
     if not name then return nil end
-    return ("%d,%d,%d,%d,%s"):format(qid, s.id,
+    return ("%d,%d,%d,%d,%s"):format(qid, s.how == "object" and 0 or s.id,
         math.floor(s.x * 10000 + 0.5), math.floor(s.y * 10000 + 0.5), name)
 end
 
@@ -517,10 +528,11 @@ end
 -- only counts as sent once it really goes out: with nobody to send to yet (member list not
 -- read, nobody online) or a busy queue it stays held and the next tick tries again.
 -- swarm values for your own finds (the swarm bridge, at Share:SwarmBridge)
-local function swQ(qid, s)   -- your quest giver as a swarm value
-    local name = cleanName(s.npc)
-    if not (name and s.id and s.x and s.y) then return nil end
-    return ("%d,%d,%d,%s"):format(s.id, math.floor(s.x * 10000 + 0.5), math.floor(s.y * 10000 + 0.5), name)
+local function swQ(qid, s)   -- your quest giver as a swarm value (an object: ID 0)
+    local name = cleanName(startName(qid, s))
+    local id = s.how == "object" and 0 or s.id
+    if not (name and id and s.x and s.y) then return nil end
+    return ("%d,%d,%d,%s"):format(id, math.floor(s.x * 10000 + 0.5), math.floor(s.y * 10000 + 0.5), name)
 end
 local function swS(o)        -- your mob spot as a swarm key + value
     return ("%d/%d/%d"):format(o.npc, math.floor(o.x / 100), math.floor(o.y / 100)), ("%d,%d,%d"):format(o.x, o.y, o.q or 0)
@@ -532,7 +544,7 @@ local function flush()
     local due = {}
     for q, at in pairs(pending) do
         local s = VoidQuestDB and VoidQuestDB.starts and VoidQuestDB.starts[q]
-        if not shareable(s) then
+        if not shareable(s, q) then
             pending[q] = nil
         elseif ((here and s.m ~= here) or now >= at) and #due < FLUSH_MAX then   -- no map known = not "left"
             due[#due + 1] = q   -- at most FLUSH_MAX a tick, so a batch always fits the queue
@@ -573,7 +585,7 @@ function Share:Found(qids)
     if not (enabled() and VoidQuestDB and VoidQuestDB.starts) then return end
     for _, q in ipairs(qids) do
         local s = VoidQuestDB.starts[q]
-        if shareable(s) and not seedHas(q, s) and not pending[q] then
+        if shareable(s, q) and not seedHas(q, s) and not pending[q] then
             pending[q] = GetTime() + HOLD_MIN + math.random() * HOLD_SPREAD
             s.t, s.sent = s.t or time(), nil   -- saved: the hold survives a /reload
         end
@@ -598,7 +610,7 @@ local function ownOn(mapID)
     local out = {}
     for q, s in pairs(VoidQuestDB and VoidQuestDB.starts or {}) do
         -- finds still held back (PRIVACY) aren't in answers either
-        if type(q) == "number" and shareable(s) and not seedHas(q, s) and s.m == mapID and not pending[q] and not fresh(s) then
+        if type(q) == "number" and shareable(s, q) and not seedHas(q, s) and s.m == mapID and not pending[q] and not fresh(s) then
             local e = encode(q, s)
             if e then out[#out + 1] = e end
             if #out >= REPLY_MAX then break end
@@ -709,12 +721,12 @@ local function takeEntries(mapID, body, sender, hashIn, fromSwarm, tag)
         local qs, ids, xs, ys, name = entry:match("^(%d%d?%d?%d?%d?%d?),(%d%d?%d?%d?%d?%d?%d?),(%d%d?%d?%d?),(%d%d?%d?%d?),(.+)$")
         local qid, npcID = tonumber(qs), tonumber(ids)
         name = cleanName(name)
-        if qid and npcID and npcID > 0 and name and VQ.ForeverQuests[qid] then
+        if qid and npcID and npcID >= 0 and name and VQ.ForeverQuests[qid] then   -- 0: starts from an object
             local x, y = tonumber(xs) / 10000, tonumber(ys) / 10000
             if x > 0 and x < 1 and y > 0 and y < 1 then
                 -- your own find for this quest already wins; don't collect votes on it
                 local own = VoidQuestDB.starts and VoidQuestDB.starts[qid]
-                if own and own.how == "npc" then
+                if own and (own.how == "npc" or own.how == "object") then
                     brought("had", tag)
                 else
                     local confirmed, what = addReport(qid, npcID, mapID, x, y, name, hash)
@@ -1535,11 +1547,28 @@ end
 -- were never sent (seedHas said "everyone has it"). Now they help make it ours. Old finds, not where you
 -- are now, so a short spread instead of the privacy hold; ownSend keeps them over a /reload until sent.
 function Share:BackfillGivers()
-    if not (enabled() and VoidQuestDB and VoidQuestDB.starts) or VoidQuestDB.giverBackOwn then return 0 end
+    if not (enabled() and VoidQuestDB and VoidQuestDB.starts) then return 0 end
     local n = 0
+    -- once (2026-11-18): quests you took from an OBJECT were never sent; the ones the shipped data doesn't
+    -- have as ours go out now (Strange Pylons, Shen'dralas)
+    if not VoidQuestDB.objBackOwn then
+        for q, s in pairs(VoidQuestDB.starts) do
+            if type(q) == "number" and type(s) == "table" and s.how == "object" and shareable(s, q)
+                and not s.sent and not seedHas(q, s) and not pending[q] then
+                s.ownSend = true
+                pending[q] = GetTime() + 60 + math.random() * 600
+                n = n + 1
+            end
+        end
+        VoidQuestDB.objBackOwn = true
+    end
+    if VoidQuestDB.giverBackOwn then
+        if next(pending) and not pendingTicker then pendingTicker = C_Timer.NewTicker(60, flush) end
+        return n
+    end
     for q, s in pairs(VoidQuestDB.starts) do
         local d = type(q) == "number" and VQ.ForeverSeed and VQ.ForeverSeed[q]
-        if d and d.ext and type(s) == "table" and shareable(s) and not s.sent and not pending[q] then
+        if d and d.ext and type(s) == "table" and shareable(s, q) and not s.sent and not pending[q] then
             s.ownSend = true
             pending[q] = GetTime() + 60 + math.random() * 600
             n = n + 1
@@ -1555,9 +1584,9 @@ end
 function Share:RestoreHeld()
     if not enabled() then return end
     for q, s in pairs(VoidQuestDB and VoidQuestDB.starts or {}) do
-        if type(q) == "number" and type(s) == "table" and shareable(s) and fresh(s) and not pending[q] then
+        if type(q) == "number" and type(s) == "table" and shareable(s, q) and fresh(s) and not pending[q] then
             pending[q] = GetTime() + math.max(60, HOLD_MAX - (time() - s.t))
-        elseif type(q) == "number" and type(s) == "table" and s.ownSend and not s.sent and shareable(s) and not pending[q] then
+        elseif type(q) == "number" and type(s) == "table" and s.ownSend and not s.sent and shareable(s, q) and not pending[q] then
             pending[q] = GetTime() + 60 + math.random() * 600   -- an old find going out to make a spot ours
         end
     end
@@ -1657,7 +1686,7 @@ function Share:SwarmBridge(net)
             local m, q = tonumber(piece), tonumber(key)
             local n, x, y, name = value:match("^(%d+),(%d+),(%d+),(.+)$")
             x, y = tonumber(x), tonumber(y)
-            return m and validMap(m) and q and VQ.ForeverQuests[q] and n and tonumber(n) > 0 and x and y
+            return m and validMap(m) and q and VQ.ForeverQuests[q] and n and tonumber(n) >= 0 and x and y   -- 0: an object
                 and x > 0 and x < 10000 and y > 0 and y < 10000 and cleanName(name) == name
         end,
         onTake = function(piece, key, _, holder, orig)
@@ -1696,7 +1725,7 @@ function Share:SwarmBridge(net)
     -- what you already shared before the swarm existed goes in now (not what's still held)
     C_Timer.After(15, function()
         for q, s in pairs(VoidQuestDB.starts or {}) do
-            if type(q) == "number" and shareable(s) and not seedHas(q, s) and not pending[q] and not fresh(s) then
+            if type(q) == "number" and shareable(s, q) and not seedHas(q, s) and not pending[q] and not fresh(s) then
                 local v = swQ(q, s)
                 if v then net:Report("q", tostring(s.m), tostring(q), v) end
             end
