@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.41 — 2026-11-18
+
+- **The Quest Book finds dungeon drops (WoW Forever, with VoidDungeon).** Search "sword", "two hand axe", "off hand", "plans" or an item's name and, below the quests, every boss drop that fits: the boss, the dungeon and its levels, and the drop chance, the ones for your level first. **Only what I can use** works here too, and a dungeon or boss name narrows it ("sword deadmines"). Click one for the way to the dungeon's entrance.
+- **The "worth it for you" box:** hover an item in it for its tooltip; shift-click links it in chat.
+
 ## 0.3.40 — 2026-11-18
 
 - **Quests that start from an object are shared too (WoW Forever).** A pylon, a wanted poster or a book that gives a quest was only learned by the player who found it. Now it reaches other VoidQuest players like a quest giver does, so new quests (like the ones in Shen'dralas) fill in faster for everyone.

@@ -162,6 +162,16 @@ local function ItemName(id)
     end
 end
 
+-- The same name as a real item link, for the quest-giver box: hover it for the item's tooltip, shift-click to link
+-- it (the user, 2026-11-18: "it has items i can see but give no tooltips in the little worth it for you box").
+-- Tooltips elsewhere can't be hovered, so they keep ItemName.
+local function ItemLink(id)
+    local n = safe(C_Item.GetItemNameByID, id)
+    if type(n) ~= "string" or secret(n) or n == "" then return nil end
+    local col = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[Quality(id)]
+    return ("%s|Hitem:%d|h%s|h|r"):format(col and col.hex or "|cffffffff", id, n)
+end
+
 ----------------------------------------------------------------------
 -- Factions
 ----------------------------------------------------------------------
@@ -305,7 +315,7 @@ function W:FactionDetail(name, s, mine, you)
             local n = C_Spell and C_Spell.GetSpellName and safe(C_Spell.GetSpellName, r.spell)
             if type(n) == "string" and not secret(n) then text = "learn " .. n end
         else
-            local n = ItemName(r.id)
+            local n = ItemLink(r.id)   -- the box only (FactionDetail): hover for the item
             if n then
                 local what = WhatItIs(r.id)
                 text = n .. (what and (" |cffaaaaaa(" .. what .. ")|r") or "")
@@ -569,6 +579,25 @@ local function Box()
     box.text:SetPoint("RIGHT", -10, 0)
     box.text:SetJustifyH("LEFT")
     box.text:SetSpacing(3)
+    -- the item names are links: hover for the item's tooltip, shift-click to link it in chat, ctrl-click to try it
+    -- on (the user, 2026-11-18: "no tooltips in the little worth it for you box"; Blizzard's quest window does the
+    -- same on its own frame, QuestInfo.lua)
+    box:EnableMouse(true)
+    box:SetHyperlinksEnabled(true)
+    box:SetScript("OnHyperlinkEnter", function(self, link)
+        if type(link) ~= "string" then return end
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
+        pcall(GameTooltip.SetHyperlink, GameTooltip, link)
+        GameTooltip:Show()
+    end)
+    box:SetScript("OnHyperlinkLeave", function() GameTooltip:Hide() end)
+    box:SetScript("OnHyperlinkClick", function(_, link)
+        local id = type(link) == "string" and tonumber(link:match("^item:(%d+)"))
+        local full = id and select(2, C_Item.GetItemInfo(id))
+        if not full then return end
+        if IsModifiedClick("CHATLINK") then ChatEdit_InsertLink(full)
+        elseif IsModifiedClick("DRESSUP") then DressUpItemLink(full) end
+    end)
     box:Hide()
     return box
 end
@@ -601,7 +630,7 @@ local function ShowBox()
                 elseif k ~= "other" then
                     liveN = liveN + 1
                     if k == "mine" then
-                        forMe[#forMe + 1] = ItemName(id) or link
+                        forMe[#forMe + 1] = ItemLink(id) or link
                         if Quality(id) >= 3 then good = true end
                     elseif why then
                         notWhy[why] = true

@@ -148,7 +148,8 @@ function B.RewardInfo(id)
 end
 
 local itemWords = {}
-local function ItemWords(id)
+-- qHint: the quality when the caller knows it (a dungeon drop's, from VoidDungeon's table)
+local function ItemWords(id, qHint)
     local w = itemWords[id]
     if w then return w end
     -- all 7 returns (safe() keeps only 3, and the slot is the 4th: "off hand" found nothing)
@@ -179,12 +180,15 @@ local function ItemWords(id)
     -- quality, by its color too ("blue leather pants", the user 2026-11-10): ForeverRewardInfo.lua
     -- (Blizzard's item table), else the client's own value when it has the item
     local q = B.RewardInfo(id)
+    if q == nil then q = qHint end
     if q == nil then q = safe(C_Item.GetItemQualityByID, id) end
     local QWORD = { [0] = "poor grey gray", [1] = "common white", [2] = "uncommon green", [3] = "rare blue",
         [4] = "epic purple", [5] = "legendary orange" }
     if q and QWORD[q] then bits[#bits + 1] = QWORD[q] end
     w = Norm(table.concat(bits, " "))
-    itemWords[id] = w
+    -- kept only once the quality is known: an item the game hasn't loaded yet would stay without its
+    -- "blue" / "green" until a reload (Sol); unknown ones are rebuilt on each call until it loads
+    if q ~= nil then itemWords[id] = w end
     return w
 end
 
@@ -230,9 +234,155 @@ local function Build()
     end
 end
 
+----------------------------------------------------------------------
+-- Dungeon drops (the user, 2026-11-18: "if i want to search for a sword in dungeon loot to find what
+-- dungeon to run"). A search also looks through VoidDungeon's boss loot when VoidDungeon is installed:
+-- one entry per item per dungeon (the boss with the best chance; "+N more bosses" when several drop it).
+-- Every word has to fit the item (slot, type, quality, name) or the dungeon / its bosses ("sword
+-- deadmines"). Names ship in VoidDungeon (Data/LootInfo.lua), so drops the game hasn't loaded are found too.
+----------------------------------------------------------------------
+local RED = 5      -- this many levels over you = "later" (quests and drops)
+local drops        -- built on the first search
+local function VD()
+    local J = _G.VoidDungeon
+    return J and J.DropIndex and J.LootInfo and J or nil
+end
+B.VD = VD
+
+local function BuildDrops()
+    if drops then return drops end
+    local J = VD()
+    if not J then return nil end
+    local ok, idx = pcall(J.DropIndex, J)
+    if not (ok and type(idx) == "table") then return nil end
+    drops = {}
+    for item, list in pairs(idx) do
+        local per = {}
+        for _, s in ipairs(list) do
+            if s.dungeon and s.boss then
+                local d = per[s.dungeon]
+                if not d then
+                    local lo, hi = tostring(s.lv or ""):match("^(%d+)%-(%d+)")
+                    lo = tonumber(lo) or s.min or 0
+                    d = { drop = true, item = item, dungeon = s.dungeon, lv = s.lv, lo = lo, hi = tonumber(hi) or lo + 5,
+                        bosses = 0, names = {} }
+                    per[s.dungeon] = d
+                    drops[#drops + 1] = d
+                end
+                d.bosses = d.bosses + 1
+                d.names[#d.names + 1] = s.boss
+                if not d.boss or (s.pct or 0) > (d.pct or 0) then d.boss, d.pct = s.boss, s.pct end
+            end
+        end
+    end
+    for _, d in ipairs(drops) do d.where = Norm(d.dungeon .. " " .. table.concat(d.names, " ")) end
+    return drops
+end
+B.AllDrops = BuildDrops   -- every drop entry (read only), for tests and other addons
+
+-- name / quality / levels (once known), whether it's worth listing, and its search text
+local function DropInfo(d)
+    if d.text then return end
+    local J = VD()
+    local name, q, il, rl
+    if J then name, q, il, rl = J:LootInfo(d.item) end
+    if not name and not d.asked and C_Item.RequestLoadItemDataByID then
+        d.asked = true
+        pcall(C_Item.RequestLoadItemDataByID, d.item)   -- Forever's own new items: the game names them
+    end
+    d.q, d.il, d.rl = q, il, rl
+    if d.keep == nil or q ~= nil then
+        -- greens and better, and recipes (Plans / Pattern / Formula ...) of any quality; until the quality is
+        -- known (an item the game hasn't loaded), weapons and armor
+        local ok, _, _, _, _, _, classID = pcall(C_Item.GetItemInfoInstant, d.item)
+        if not ok then classID = nil end
+        d.keep = (q ~= nil and q >= 2) or classID == 9 or (q == nil and (classID == 2 or classID == 4))
+    end
+    if name then
+        d.name = name
+        d.text = ItemWords(d.item, q) .. " " .. Norm(name) .. " " .. d.where
+    end
+end
+
+-- AllIn without its per-call clean-up: the text is already " one space between words " (2,000+ drops a keystroke)
+local function AllInPadded(text, terms)
+    for _, w in ipairs(terms) do
+        if B.prefix then
+            if not text:find(" " .. w, 1, true) then return false end
+        elseif not (text:find(" " .. w .. " ", 1, true) or text:find(" " .. w .. "s ", 1, true)
+            or text:find(" " .. w .. "es ", 1, true)
+            or (w:sub(-1) == "s" and text:find(" " .. w:sub(1, -2) .. " ", 1, true))) then
+            return false
+        end
+    end
+    return true
+end
+
+function B.DropMatches(d, terms)
+    DropInfo(d)
+    if not d.keep then return false end
+    -- what this character can use (and hold in the off hand) changes only with class / level: kept per drop
+    local _, cls = UnitClass("player")
+    local who = (cls or "") .. (UnitLevel("player") or 0)
+    if d.who ~= who or d.padded == nil or d.paddedFor ~= d.text then
+        d.who, d.paddedFor = who, d.text
+        d.canUse = CanUse(d.item)
+        local text = d.text or (ItemWords(d.item, d.q) .. " " .. d.where)
+        if OffhandCapable(d.item) then text = text .. " offhand" end
+        d.padded = " " .. text:gsub("%s+", " ") .. " "
+    end
+    if B.usable and not d.canUse then return false end
+    return AllInPadded(d.padded, terms)
+end
+
+-- can (you can wear it now or within a few levels) / later; d.need = the level it asks for (est = estimated)
+local function DropStatus(d)
+    local me = UnitLevel("player") or 1
+    d.est = nil
+    local need = d.rl or 0
+    if need == 0 and (d.il or 0) > 0 then
+        need, d.est = math.min(60, math.max(1, d.il - 5)), true   -- Classic gear: ~5 item levels over its level
+    end
+    if need == 0 then need, d.est = d.lo, true end
+    d.need = need
+    d.status = (need >= me + RED or d.lo >= me + RED) and "later" or "can"
+    return d.status
+end
+
+-- can first: what fits your level now (a bit under before a bit over), better items first; later: lowest first
+local function SortDrops(list)
+    local me = UnitLevel("player") or 1
+    local function gap(d) return d.need <= me and (me - d.need) or (d.need - me) * 1.5 end
+    table.sort(list, function(a, b)
+        if a.status ~= b.status then return a.status == "can" end
+        if a.status == "can" then
+            local ga, gb = gap(a), gap(b)
+            if ga ~= gb then return ga < gb end
+            if (a.il or 0) ~= (b.il or 0) then return (a.il or 0) > (b.il or 0) end
+        elseif a.need ~= b.need then
+            return a.need < b.need
+        end
+        if (a.pct or 0) ~= (b.pct or 0) then return (a.pct or 0) > (b.pct or 0) end
+        return (a.name or "") < (b.name or "")
+    end)
+end
+
+-- the way to a drop's dungeon: its entrance (VoidDungeon's, learned ones too), routed like a quest giver
+function B.GoDrop(d)
+    local J = VD()
+    local at = J and J.EntranceOf and J:EntranceOf(d.dungeon)
+    at = at and at[1]
+    if not at then
+        VQ:Print(("%s: the entrance isn't known yet (VoidDungeon learns it when you walk in)."):format(d.dungeon))
+        return
+    end
+    local ok, why = ns.Route:Go({ map = at[1], x = at[2], y = at[3], name = d.dungeon .. " entrance" },
+        { say = function(msg) VQ:Print(msg) end })
+    if not ok then VQ:Print(("%s: %s"):format(d.dungeon, why or "can't pin there")) end
+end
+
 -- status: done / log / can / later; e.low = grey (still doable); e.level (0 = not loaded yet)
 -- Same rules as ForeverZone's Available, but with known levels only (no server requests here)
-local RED = 5
 local function Classify(e)
     local F = FZ()
     local st = F:Status(e.id)
@@ -362,12 +512,16 @@ local function Current()
         -- every word must fit the quest (title / zone / reward names) or ONE reward item ("off hand
         -- sword" = a reward that is a sword AND goes in the off hand); "Only what I can use" counts
         -- only rewards your class can wear or wield
-        local terms, out = Terms(B.query), {}
+        local terms, out, dout = Terms(B.query), {}, {}
+        local dl = BuildDrops()
         B.prefix = false
         for pass = 1, 2 do
         if pass == 2 then
-            if #out > 0 then break end
+            if #out > 0 or #dout > 0 then break end
             B.prefix = true          -- nothing as whole words: try word starts ("dag", "leathe")
+        end
+        for _, d in ipairs(dl or {}) do
+            if B.DropMatches(d, terms) then dout[#dout + 1] = d end
         end
         for _, e in ipairs(all) do
             -- the quest's own name or zone always counts ("hatefury", "desolace" found nothing with
@@ -382,7 +536,8 @@ local function Current()
             if hit then out[#out + 1] = e end
         end
         end
-        return out, ("Search: \"%s\"%s"):format(B.query, B.usable and "  (only what you can use)" or "")
+        return out, ("Search: \"%s\"%s"):format(B.query, B.usable and "  (only what you can use)" or ""), false, nil,
+            dl and dout or nil
     end
     local c = CatByKey(B.cat) or CatByKey("summary")
     if c.key == "summary" then
@@ -391,6 +546,21 @@ local function Current()
         return out, "Can do now and in your log, closest to your level", true
     end
     return c.list, c.label, false, c.vendorBags
+end
+
+-- One search without the window (self-test, offline tests, other addons): the quests, and the dungeon
+-- drops sorted the way the book shows them (nil without VoidDungeon).
+function B.Search(q, usable)
+    local keepQ, keepU = B.query, B.usable
+    B.query, B.usable = q, usable
+    local ok, list, _, _, _, dl = pcall(Current)
+    B.query, B.usable = keepQ, keepU
+    if not ok then error(list, 2) end
+    if dl then
+        for _, d in ipairs(dl) do DropStatus(d) end
+        SortDrops(dl)
+    end
+    return list, dl
 end
 
 ----------------------------------------------------------------------
@@ -468,15 +638,26 @@ local function MakeRow(parent, i)
         row.items[k] = b
     end
     row:SetScript("OnClick", function(s)
-        if s.e and s.e.vendor then
+        if s.e and s.e.drop then
+            local link = IsModifiedClick("CHATLINK") and ItemLinkOf(s.e.item)
+            if link then ChatEdit_InsertLink(link) else B.GoDrop(s.e) end
+        elseif s.e and s.e.vendor then
             if VoidGPS and VoidGPS.Goods then VoidGPS.Goods:GoVendor(s.e.v, s.e.name) end
         elseif s.e and s.e.id then
             FZ():Go(s.e.id)
         end
     end)
     row:SetScript("OnEnter", function(s)
-        if not s.e then return end
-        if s.e.vendor then
+        if not s.e or s.e.header then return end
+        if s.e.drop then
+            local d = s.e
+            GameTooltip:SetOwner(s, "ANCHOR_RIGHT"); GameTooltip:SetItemByID(d.item)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine(("Drops in %s (%s)"):format(d.dungeon, d.lv or "?"), 0.6, 1, 0.6)
+            GameTooltip:AddLine(d.bosses > 1 and ("from " .. table.concat(d.names, ", ")) or ("from " .. d.boss), 1, 1, 1, true)
+            GameTooltip:AddLine("Click: the way to the dungeon entrance · Shift-click: link it", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        elseif s.e.vendor then
             GameTooltip:SetOwner(s, "ANCHOR_RIGHT"); GameTooltip:SetItemByID(s.e.item)
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Sold by " .. s.e.v.name, 0.6, 1, 0.6)
@@ -502,6 +683,32 @@ local function FillRow(row, e)
         return
     end
     row.icon:Show()
+    if e.drop then
+        local icon = safe(C_Item.GetItemIconByID, e.item) or 134400
+        row.icon:SetTexture(icon)
+        row.icon:SetDesaturated(e.status == "later")
+        local qc = e.q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[e.q]
+        local hex = (qc and qc.hex) or "|cffffffff"
+        local lv = (e.need or 0) > 0 and ((e.est and "[~%d] " or "[%d] "):format(e.need)) or ""
+        local nameColor = e.status == "later" and "|cff999999" or "|cffffffff"
+        row.title:SetText(nameColor .. lv .. "|r" .. hex .. (e.name or ("item " .. e.item)) .. "|r")
+        local bits = { ("%s, %s (%s)"):format(e.boss, e.dungeon, e.lv or "?") }
+        local p = e.pct or 0
+        if p > 0 then
+            bits[#bits + 1] = (p >= 10 and ("%d%%"):format(math.floor(p + 0.5)) or ("%.1f%%"):format(p):gsub("%.0%%", "%%"))
+        end
+        if e.bosses > 1 then bits[#bits + 1] = ("+%d more boss%s"):format(e.bosses - 1, e.bosses > 2 and "es" or "") end
+        if e.status == "later" then bits[#bits + 1] = STATUS_TEXT.later end
+        local J = VD()
+        if not (J and J.EntranceOf and J:EntranceOf(e.dungeon)) then bits[#bits + 1] = "|cff888888entrance not known yet|r" end
+        row.sub:SetText(table.concat(bits, "  ·  "))
+        local b = row.items[1]   -- the item on the right too: hover, shift-click to link (like a reward)
+        b.item = e.item
+        b.tex:SetTexture(icon)
+        b:Show()
+        row:Show()
+        return
+    end
     if e.vendor then
         row.icon:SetTexture(safe(C_Item.GetItemIconByID, e.item) or 134400)
         row.icon:SetDesaturated(false)
@@ -553,9 +760,13 @@ local win
 local function Render()
     if not (win and win:IsShown()) then return end
     Categories()
-    local list, title, isSummary, vendorBags = Current()
-    -- counts + filter
+    local list, title, isSummary, vendorBags, dl = Current()
+    -- counts + filter (dungeon drops are "can do" or "later")
     local c = Counts(list)
+    for _, d in ipairs(dl or {}) do
+        local st = DropStatus(d)
+        c.all, c[st] = c.all + 1, (c[st] or 0) + 1
+    end
     for key, btn in pairs(win.filters) do
         btn:SetText(("%s (%d)"):format(btn.label, c[key] or 0))
         btn:SetEnabled(B.filter ~= key)
@@ -580,7 +791,24 @@ local function Render()
             for _, v in ipairs(vb) do shown[#shown + 1] = v end
         end
     end
-    win.listTitle:SetText(("%s  |cff888888%d|r"):format(title, #shown))
+    local nQuests, nDrops = #shown, 0
+    if dl then
+        local ds = {}
+        for _, d in ipairs(dl) do
+            if B.filter == "all" or d.status == B.filter then ds[#ds + 1] = d end
+        end
+        nDrops = #ds
+        if nDrops > 0 then
+            SortDrops(ds)
+            shown[#shown + 1] = { header = ("Dungeon drops (%d)  |cff888888click one for the way to the dungeon|r"):format(nDrops) }
+            for _, d in ipairs(ds) do shown[#shown + 1] = d end
+        end
+    end
+    if dl then
+        win.listTitle:SetText(("%s  |cff888888%d quests · %d dungeon drops|r"):format(title, nQuests, nDrops))
+    else
+        win.listTitle:SetText(("%s  |cff888888%d|r"):format(title, #shown))
+    end
 
     -- summary block
     win.summary:SetShown(isSummary and not B.query)
@@ -664,7 +892,7 @@ local function BuildWindow()
     -- search
     f.search = CreateFrame("EditBox", nil, f, "SearchBoxTemplate")
     f.search:SetSize(260, 20); f.search:SetPoint("TOPRIGHT", -36, -10); f.search:SetAutoFocus(false)
-    if f.search.Instructions then f.search.Instructions:SetText("Search quests, zones or reward items") end
+    if f.search.Instructions then f.search.Instructions:SetText("Search quests, rewards or dungeon loot") end
     f.search:HookScript("OnTextChanged", function(b)
         local t = strtrim(b:GetText() or "")
         B.query = (#t >= 2) and t or nil
@@ -694,7 +922,7 @@ local function BuildWindow()
     f.usable:SetScript("OnEnter", function(s)
         GameTooltip:SetOwner(s, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("Only what I can use")
-        GameTooltip:AddLine("When searching, count only rewards your class can wear or wield (armor type, weapon skills, dual wield).", 1, 1, 1, true)
+        GameTooltip:AddLine("When searching, count only rewards and dungeon drops your class can wear or wield (armor type, weapon skills, dual wield).", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     f.usable:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -802,8 +1030,17 @@ function B:SelfTest()
     local QN = { [0] = "grey", "white", "green", "blue", "purple", "orange" }
     local function run(q, usable)
         local keepQ, keepU = B.query, B.usable
+        local _, dl = B.Search(q, usable)
         B.query, B.usable = q, usable
         local list = Current()
+        local dtop = {}
+        if dl then
+            for i = 1, math.min(3, #dl) do
+                local d = dl[i]
+                dtop[i] = ("[%s%d] %s (q%s) - %s, %s %s%%"):format(d.est and "~" or "", d.need, d.name or ("item " .. d.item),
+                    tostring(d.q), d.boss, d.dungeon, tostring(d.pct))
+            end
+        end
         local terms = Terms(q)
         local c = Counts(list)
         SortList(list)
@@ -824,7 +1061,8 @@ function B:SelfTest()
                 e.est and ("[~" .. e.est .. "]") or "", e.title, e.status, item or "matched by quest text")
         end
         B.query, B.usable = keepQ, keepU
-        return { q = q, usable = usable, n = #list, can = c.can, later = c.later, done = c.done, log = c.log, top = top }
+        return { q = q, usable = usable, n = #list, can = c.can, later = c.later, done = c.done, log = c.log, top = top,
+            drops = dl and #dl or "no VoidDungeon", dtop = dtop }
     end
     local out = { at = date("%Y-%m-%d %H:%M"), level = UnitLevel("player"), class = select(2, UnitClass("player")), runs = {} }
     for _, q in ipairs(TESTS) do out.runs[#out.runs + 1] = run(q, true) end
@@ -856,7 +1094,7 @@ end
 local pending, staleAll
 local ev = CreateFrame("Frame")
 for _, e in ipairs({ "QUEST_DATA_LOAD_RESULT", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED", "PLAYER_LEVEL_UP",
-    "QUEST_LOG_UPDATE" }) do
+    "QUEST_LOG_UPDATE", "GET_ITEM_INFO_RECEIVED" }) do
     pcall(ev.RegisterEvent, ev, e)
 end
 local function Redraw()
@@ -872,6 +1110,10 @@ ev:SetScript("OnEvent", function(_, e, qid)
         return
     end
     if e == "QUEST_LOG_UPDATE" then Redraw() return end   -- readiness is read live when drawn
+    if e == "GET_ITEM_INFO_RECEIVED" then   -- a drop the game just named (Forever's own new items)
+        if B.query and drops then Redraw() end
+        return
+    end
     -- accepted / turned in / abandoned / level: every status may change
     if win and win:IsShown() then
         for _, x in ipairs(all) do x.status = nil end
