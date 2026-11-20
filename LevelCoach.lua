@@ -311,12 +311,16 @@ local function ForeverStep()
     end
     local detail = ("%d in your log here, %d more you can pick up (%d with a known giver). The zone list (/vq fz) has them all.")
         :format(inLog, open, known)
+    -- A suggestion, not a quest you're on (the user, 2026-11-19: "next to pick up in the zone your in, it looks
+    -- confusing like its a quest im on but its not"): the game's yellow "!" for a quest you can take, "Not taken
+    -- yet:", and the name in plain white, not the green of quests in your log (offer = true, RenderStrip).
     if pick then
         local who = VQ.Starts and VQ.Starts:Giver(pick.id)
-        return { n = 4, head = "Next:", title = ("Pick up '%s'%s"):format(pick.title, who and (" from " .. who) or ""),
+        return { n = 4, head = "|cffffd200!|r Not taken yet:", offer = true,
+            title = ("%s%s"):format(pick.title, who and (" |cff9a9aa6from " .. who .. "|r") or ""),
             detail = detail, pin = { m = pick.spot.m, x = pick.spot.x, y = pick.spot.y } }
     end
-    return { n = 4, head = "Next:", title = ("Quest in %s"):format(zone), detail = detail }
+    return { n = 4, head = "Here:", offer = true, title = "|cff9a9aa6no new quest with a known giver|r", detail = detail }
 end
 
 -- returns { n = 0..4, title, detail, pin = {m,x,y}?, follow = zone?, questID? }
@@ -614,7 +618,9 @@ function mod:RenderStrip(f, top)
     -- panel, 2026-11-05)
     local w = math.max(100, (f:GetWidth() or 300) - 16)
     c:SetWidth(w); c.title:SetWidth(w); c.detail:SetWidth(w)
-    c.title:SetText(("|cff00c7ff%s|r |cff55ff55%s|r"):format(s.head or ("Step %d of 4:"):format(s.n), s.title))
+    -- an offer (a quest not taken yet) in white, so it never looks like a quest in your log (green)
+    c.title:SetText(("|cff00c7ff%s|r %s%s|r"):format(s.head or ("Step %d of 4:"):format(s.n),
+        s.offer and "|cffe8e8ec" or "|cff55ff55", s.title))
     -- once a zone guide is walking you (step 4, nothing to start), one line is enough:
     -- the panel below shows the actual step
     local compact = s.n == 4 and not s.follow

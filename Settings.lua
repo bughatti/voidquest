@@ -26,6 +26,9 @@ VQ.SettingsDefaults = {
     share = true,   -- WoW Forever: share quest-giver spots with other VoidQuest players (ForeverShare.lua)
     mobLoot = true, -- "Loot: yours / someone else's" on mob tooltips (MobLoot.lua)
     mobAtlas = true, -- WoW Forever: record every mob seen and killed (MobAtlas.lua, /vq atlas)
+    -- WoW Forever group-up (GroupUp.lua) and LFG for elite quests (QuestLFG.lua): on unless turned
+    -- off. Without these the boxes showed unticked while the features ran (found 2026-11-19).
+    groupAsks = true, groupArrival = true, questLfgAlert = true,
 }
 
 function VQ:Get(key)
@@ -219,7 +222,8 @@ function mod:EnsurePanel()
         makeCheck(f, x, y, "Share quest givers with other players", "share", "WoW Forever has no quest markers on the map. When you find a quest giver, VoidQuest tells a few other VoidQuest players online where it is (by hidden addon whisper), and learns the ones they find. Sent: the quest, the NPC and its spot. Like any whisper, the players who get it can see which character sent it, so your finds go out only after you've left that map (or 10-20 minutes later), never live. A spot is used once two players agree on it."); y = y - 24
         makeCheck(f, x, y, "Let VoidQuest players on your quest ask you to group", "groupAsks", "Another VoidQuest player in your zone on the same quest can Ctrl-click it to ask you to group, and you count toward the grey players-here number on their quest lines (only VoidQuest players in your zone see which quests you have, never your name): you get a pop-up with their name, level and class, and Accept or No thanks. Accept takes their invite. No thanks (or no answer in 5 minutes) means you are never asked about that quest again. You are only asked when you are solo, out of combat and outside instances, at most once every 3 minutes."); y = y - 24
         makeCheck(f, x, y, "Say when VoidQuest players here share your quests", "groupArrival", "Arriving in a zone, one chat line when other VoidQuest players there are on your quests (\"3 VoidQuest players in The Barrens are on 2 of your quests\"), at most once per zone every 30 minutes. The numbers stay on the quest lines either way."); y = y - 24
-        f:SetHeight(922)
+        makeCheck(f, x, y, "Say when someone in chat is on your elite quests", "questLfgAlert", "When a chat line names one of your elite quests (or the elite it asks you to kill), one chat line with their name to click and whisper. At most once per player and quest every 10 minutes. The LFG badge on the quest line lists them either way."); y = y - 24
+        f:SetHeight(946)
         -- "Help others change layer": ONE switch for every Void addon (LayerHelp.lua); the hub has the same one
         local LH = rawget(_G, "VoidLayerHelp")
         if LH and rawget(_G, "VoidLayerCore") then

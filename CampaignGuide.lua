@@ -3575,6 +3575,33 @@ local function ShareS(holder)
     return b
 end
 
+-- "LFG" on an elite quest's line (QuestLFG.lua)
+local function LfgBadge(holder)
+    local b = holder.lfgB
+    if b then return b end
+    b = CreateFrame("Button", nil, holder)
+    b:SetSize(22, 11)
+    b:SetFrameLevel(holder:GetFrameLevel() + 2)   -- over the line, so the click is the badge's
+    local bg = b:CreateTexture(nil, "ARTWORK")
+    bg:SetAllPoints(); bg:SetColorTexture(0.78, 0.42, 0.05, 1)
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.25)
+    b.text = b:CreateFontString(nil, "OVERLAY"); VQ:SetFont(b.text, 9, "")
+    b.text:SetPoint("CENTER", 0, 0); b.text:SetTextColor(1, 1, 1); b.text:SetText("LFG")
+    b:SetScript("OnClick", function(s) if s.qid and VQ.QuestLFG then VQ.QuestLFG:Toggle(s.qid) end end)
+    b:SetScript("OnEnter", function(s)
+        GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Find a group for this elite quest")
+        local t = s.qid and safe(C_QuestLog.GetTitleForQuestID, s.qid)
+        if t then GameTooltip:AddLine(t, 1, 1, 1) end
+        GameTooltip:AddLine("Who in chat is on it, a post for LFG chat (you see it before it's sent), and VoidQuest players here", .8, .8, .8, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    holder.lfgB = b
+    return b
+end
+
 -- Put a group count at the right of a line's text (fs = the line's text, holder = the
 -- frame it sits in): a white number on a solid blue badge, so it reads over any ground
 -- behind a see-through panel (plain coloured digits got lost, 2026-11-06). The text stops
@@ -3603,6 +3630,18 @@ local function SetLineParty(holder, fs, n, shareQid)
         edge, gap = s, -3
     elseif holder.shareS then
         holder.shareS:Hide(); holder.shareS.qid = nil
+    end
+    -- WoW Forever: "LFG" on an elite quest (QuestLFG.lua; the user, 2026-11-19: "elite quests
+    -- only, show the message first"). Click = find a group for it.
+    if shareQid and VQ.QuestLFG and VQ.QuestLFG:Offer(shareQid) then
+        local b = LfgBadge(holder)
+        b.qid = shareQid
+        b:ClearAllPoints(); b:SetPoint("RIGHT", edge, edge == holder and "RIGHT" or "LEFT", gap, 0)
+        b:Show()
+        w = w + b:GetWidth() + 3
+        edge, gap = b, -3
+    elseif holder.lfgB then
+        holder.lfgB:Hide(); holder.lfgB.qid = nil
     end
     local bg = holder.partyBg
     bg:ClearAllPoints()
@@ -3886,6 +3925,57 @@ local function PanelBudget() return (VQ:Get("panelHeight") or 230) - FOOTER end 
 -- How tall the guide's own part is: from the panel's top to the bottom of `below` (the
 -- region the quest lines hang from), plus room at the bottom for the resize grip. Both
 -- are on the same frame, so screen units match. nil when the layout isn't known yet.
+-- The guided step ("Pick up: ..." / "Talk to ...", way there, pick up first) sits in a thin box, with an "Active"
+-- heading over the quest lines below it (the user, 2026-11-19: "under that area where it says Pick up and Talk to
+-- put all that in a thin box" / "put Active above the active quests"). The box is drawn on the panel itself
+-- (ARTWORK layer) so the step's text (OVERLAY) stays on top; an empty frame only carries the rectangle.
+local function StepBox(f)
+    if f.stepBox then return f.stepBox end
+    local a = CreateFrame("Frame", nil, f)
+    local s = UIParent and UIParent:GetEffectiveScale()
+    local px = ((s and s > 0 and PixelUtil and PixelUtil.GetPixelToUIUnitFactor) and (PixelUtil.GetPixelToUIUnitFactor() / s) or 1) * 1.01
+    local function tex(r, g, b, al)
+        local t = f:CreateTexture(nil, "ARTWORK", nil, -8)
+        t:SetTexture("Interface\\Buttons\\WHITE8X8")
+        if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(true) end
+        t:SetVertexColor(r, g, b, al)
+        return t
+    end
+    local bg = tex(0, 0, 0, .25)
+    bg:SetPoint("TOPLEFT", a, "TOPLEFT", px, -px); bg:SetPoint("BOTTOMRIGHT", a, "BOTTOMRIGHT", -px, px)
+    local top, bottom, left, right = tex(0, .78, 1, .45), tex(0, .78, 1, .45), tex(0, .78, 1, .45), tex(0, .78, 1, .45)
+    top:SetPoint("TOPLEFT", a, "TOPLEFT"); top:SetPoint("BOTTOMRIGHT", a, "TOPRIGHT", 0, -px)
+    bottom:SetPoint("TOPLEFT", a, "BOTTOMLEFT", 0, px); bottom:SetPoint("BOTTOMRIGHT", a, "BOTTOMRIGHT")
+    left:SetPoint("TOPLEFT", a, "TOPLEFT", 0, -px); left:SetPoint("BOTTOMRIGHT", a, "BOTTOMLEFT", px, px)
+    right:SetPoint("TOPLEFT", a, "TOPRIGHT", -px, -px); right:SetPoint("BOTTOMRIGHT", a, "BOTTOMRIGHT", 0, px)
+    a.parts = { bg, top, bottom, left, right }
+    f.activeHdr = f:CreateFontString(nil, "OVERLAY"); VQ:SetFont(f.activeHdr, 11)
+    f.activeHdr:SetText("|cff88ccffActive|r")
+    f.stepBox = a
+    return a
+end
+
+local function HideStepBox(f)
+    if not f.stepBox then return end
+    for _, t in ipairs(f.stepBox.parts) do t:Hide() end
+    f.activeHdr:Hide()
+end
+
+-- Box from the step line down to `below` (its last shown line); "Active" under it. Returns what the quest lines
+-- hang from (the heading).
+local function PlaceStepBox(f, below)
+    local a = StepBox(f)
+    a:ClearAllPoints()
+    a:SetPoint("TOPLEFT", f.step, "TOPLEFT", -6, 5)
+    a:SetPoint("RIGHT", f, "RIGHT", -6, 0)
+    a:SetPoint("BOTTOM", below, "BOTTOM", 0, -5)
+    for _, t in ipairs(a.parts) do t:Show() end
+    f.activeHdr:ClearAllPoints()
+    f.activeHdr:SetPoint("TOPLEFT", a, "BOTTOMLEFT", 6, -6)
+    f.activeHdr:Show()
+    return f.activeHdr
+end
+
 local function MeasuredCore(f, below)
     local top, bottom = f:GetTop(), below and below:GetBottom()
     if not (top and bottom) or top <= bottom then return nil end
@@ -4267,6 +4357,8 @@ function mod:ShowTabs(f, on, popH)
     local top = -25 - (popH or 0)
     f.tabZones:ClearAllPoints(); f.tabZones:SetPoint("TOPLEFT", 12, top)
     f.tabDungeons:ClearAllPoints(); f.tabDungeons:SetPoint("LEFT", f.tabZones, "RIGHT", 14, 0)
+    -- the step's box needs a little room under the tabs (it starts 5 px above the step line)
+    f.step:ClearAllPoints(); f.step:SetPoint("TOPLEFT", 12, top - 26)
     self:UpdateTabLabels(f)
 end
 function mod:UpdateTabLabels(f)
@@ -4293,6 +4385,7 @@ function mod:SetStepMode(f, popH)
     if f.obj then f.obj:SetShown(VQ:Get("showObjective") ~= false) end
     if f.questRows then for _, row in ipairs(f.questRows) do row.btn:Hide(); row.obj:Hide(); if row.bar then row.bar:Hide() end end end
     self:HideQuestBlock(f)   -- re-drawn by the step / no-step branch
+    HideStepBox(f)           -- the step branches box it again (PlaceStepBox)
     f.chapter:ClearAllPoints(); f.chapter:SetPoint("TOPLEFT", 12, -27 - popH)
     f.step:ClearAllPoints(); f.step:SetPoint("TOPLEFT", 12, -44 - popH)
     -- Hang the objective off the step's BOTTOM so a step that wraps to two lines
@@ -4445,6 +4538,7 @@ function mod:Refresh()
         -- a pin the coach button set stays (this ran on the refresh right after setting it)
         if not (self._wp and self._wp.coach) then self:ClearOurWaypoint() end
         if VQ.Ring then VQ.Ring:Set(nil) end
+        HideStepBox(f)   -- quest-only list: no guided step to box
         self:RenderQuestList(f, popH)
         self._lastStep = nil
         PanelShown(f, true)
@@ -4679,6 +4773,7 @@ function mod:Refresh()
         local budget = PanelBudget()
         -- measure where the guide's lines really end (the estimate above runs ~90 px high,
         -- which left a resized panel with empty space AND "+N more", 2026-11-05)
+        below = PlaceStepBox(f, below)   -- the step in its box, "Active" under it: quest lines hang from that
         local measured = MeasuredCore(f, below)
         if measured then core = measured end
         local fit = math.floor((budget - core - 6) / QROW)
@@ -4722,6 +4817,7 @@ function mod:Refresh()
         local core = 90 + popH + (f.meta:IsShown() and ((f.meta:GetStringHeight() or 12) + 6) or 0)
         local budget = PanelBudget()
         local anchor = (f.meta:IsShown() and f.meta) or (f.obj:IsShown() and f.obj) or f.step
+        anchor = PlaceStepBox(f, anchor)
         local measured = MeasuredCore(f, anchor)
         if measured then core = measured end
         local lines = self:RenderQuestBlock(f, anchor, math.floor((budget - core - 6) / QROW), nil)

@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.42 — 2026-11-19
+
+- **The zone suggestion no longer looks like a quest you're on (WoW Forever).** The line under the zone name now reads "! Not taken yet: Stranglethorn Fever from Witch Doctor Unbagwa" with the quest name in white, not the green of the quests in your log. With nothing to suggest it says so in grey.
+- **The guide step has its own box.** Under the Zones / Dungeons tabs, the quest you're guided to ("Pick up", "Talk to", the way there) sits in a thin box, and an **Active** heading starts the list of your quests below it.
+- **Quest items you can safely delete are now exact (WoW Forever).** The red "safe to destroy" mark shows only when every quest that uses the item is turned in, or is one your character can never take. Items a quest hands you (like Bel'dugur's Note) are kept until you turn that quest in; items for repeatable turn-ins are always kept. Items from quests you finished before VoidQuest was watching now get a verdict too, and hovering an item in your bank shows the same answer. When in doubt, it says keep.
+- **LFG on elite quests (WoW Forever).** Elite quests in your list get a small orange **LFG** tag. Click it to see who in chat mentioned that quest or its elite in the last 30 minutes (click a name to whisper), a ready-made LFG line you can edit and post with one click (nothing is sent before you click Post), and a button to ask VoidQuest players on the same quest. While you quest, one chat line tells you when someone in chat names one of your elite quests (setting, on by default).
+- Settings: the two group-up boxes showed unticked while they were on; fixed.
+
 ## 0.3.41 — 2026-11-18
 
 - **The Quest Book finds dungeon drops (WoW Forever, with VoidDungeon).** Search "sword", "two hand axe", "off hand", "plans" or an item's name and, below the quests, every boss drop that fits: the boss, the dungeon and its levels, and the drop chance, the ones for your level first. **Only what I can use** works here too, and a dungeon or boss name narrows it ("sword deadmines"). Click one for the way to the dungeon's entrance.

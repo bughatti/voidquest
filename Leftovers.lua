@@ -8,8 +8,10 @@
 --             item the quest handed you / links, or its text names it), a WoW Forever quest you
 --             haven't done needs it (ForeverItemQuests.lua: "for a later quest"), or it's on the
 --             hand-made KEEP list (used somewhere to make / summon what a quest needs)
---   done    : none of that, and a quest it belonged to is turned in ("safe to destroy" -- it
---             was seen tied to that quest)
+--   done    : none of that, and EVERY quest tied to it is settled: turned in for good, or one this
+--             character can never take ("safe to destroy"). Ties = the quest data (needs it, hands it
+--             to you: ForeverItemGiven, starts with it) + what VoidQuest saw in your log. 2026-11-19, the
+--             user: "it doesnt always remove the item ... the first one has to be exact".
 --   unknown : no quest found for it. No mark in the bags, only a tooltip line ("keep it if
 --             unsure"): it used to be a yellow ? that read as "delete me" (2026-11-16).
 --
@@ -62,10 +64,44 @@ local function Done(qid)
     return safe(C_QuestLog.IsQuestFlaggedCompleted, qid) and not safe(C_QuestLog.GetLogIndexForQuestID, qid)
 end
 
--- Finished for good: done, and not a quest you can do again (a repeatable turn-in's items
--- stay useful -- Darkmoon artifacts; Codex review). Only this can make an item "done".
+local function InLog(qid) return safe(C_QuestLog.GetLogIndexForQuestID, qid) ~= nil end
+
+-- A quest you can do again (a repeatable turn-in's items stay useful -- Darkmoon artifacts; Codex
+-- review). The game only knows for quests in your log, so VoidDB's flag (ForeverRepeatable) first.
+local function Repeatable(qid)
+    return (VQ.ForeverRepeatable and VQ.ForeverRepeatable[qid]) or safe(C_QuestLog.IsRepeatableQuest, qid) or false
+end
+
+-- Finished for good: done, and not a quest you can do again.
 local function DoneForGood(qid)
-    return Done(qid) and not safe(C_QuestLog.IsRepeatableQuest, qid)
+    return Done(qid) and not Repeatable(qid)
+end
+
+-- This character can never take it: another faction, class or race, past its top level, or a branch
+-- closed by a quest you DID (a rival only sitting in your log could still be abandoned, so that one
+-- doesn't count; 2026-11-19, the user: "the first one has to be exact"). Returns true + the reason.
+local function Never(qid)
+    local row, F = nil, VQ.Forever
+    if VQ.ForeverQuests then row = VQ.ForeverQuests[qid] end
+    if not row or not F or not F.Eligible then return false end
+    if F:Eligible(row) then return false end
+    local rr = VQ.ForeverRules and VQ.ForeverRules[qid]
+    if rr then
+        for _, q in ipairs(rr.ex or {}) do
+            if InLog(q) then return false end
+        end
+        if rr.bf and InLog(rr.bf) then return false end
+    end
+    local state, why = nil, nil
+    if F.Rule then state, why = F:Rule(qid) end
+    -- the rule's reason only when it's the one closing it (else: faction, class or race)
+    return true, (state == "never" and why) or "not for your faction, class or race"
+end
+
+-- Settled: turned in for good, or one you can never take. Only when EVERY quest tied to an item is
+-- settled can the item be "safe to destroy".
+local function Settled(qid)
+    return DoneForGood(qid) or (Never(qid))
 end
 
 -- Chains no quest data shows: the item is used somewhere to make or summon what a quest needs (the
@@ -86,14 +122,10 @@ end
 local function LaterQuests(itemID)
     local qs = VQ.ForeverItemQuests and VQ.ForeverItemQuests[itemID]
     if not qs then return nil end
-    local F, out = VQ.Forever, {}
+    local out = {}
     for _, q in ipairs(qs) do
-        if not safe(C_QuestLog.IsQuestFlaggedCompleted, q) then
-            local row = VQ.ForeverQuests and VQ.ForeverQuests[q]
-            local ok = true
-            if F and F.Eligible and row then ok = F:Eligible(row) end
-            if ok then out[#out + 1] = q end
-        end
+        -- not done (or done but repeatable), and one you can still take
+        if not Settled(q) then out[#out + 1] = q end
     end
     if #out == 0 then return nil end
     table.sort(out, function(a, b)
@@ -107,7 +139,10 @@ end
 -- WoW Forever without the item -> quest index loaded (never expected, it ships): nothing may be
 -- called "safe to destroy" then, since a later quest could need it (Codex review)
 local function IndexMissing()
-    return VQ.ForeverQuests ~= nil and VQ.ForeverItemQuests == nil
+    -- any of the three tables (one generated file): without "given" or "repeatable" a needed item could
+    -- look settled (Codex Sol 2026-11-19)
+    return VQ.ForeverQuests ~= nil and (VQ.ForeverItemQuests == nil or VQ.ForeverItemGiven == nil
+        or VQ.ForeverRepeatable == nil)
 end
 
 -- Tooltip lines for one quest: what, from whom and where, and whether you can take it yet.
@@ -141,20 +176,17 @@ local function QuestLines(tt, q)
     end
 end
 
--- itemID -> { verdict = "keep" | "done" | "unknown", why = text, name = item name }
+-- itemID -> { verdict = "keep" | "done" | "unknown", why = text, name = item name } (false = not a quest item)
 -- ("unknown" replaced "unneeded", which VoidBags drew as a yellow ?: people read it as "safe to delete"
 -- when it only meant "no quest found", 2026-11-16. Unknown items get no mark, only a tooltip line.)
 local cache, dirty = {}, true
 
 local missing = false   -- a quest item whose data hadn't loaded: rebuild when it arrives
+local logQuests = {}    -- what the quests in your log need (rebuilt with the cache)
 
-local function Build()
-    dirty = false
-    missing = false
-    cache = {}
+local function ScanLog()
     local QI = VQ.QuestItem
-    -- what the quests in your log need
-    local logQuests = {}
+    logQuests = {}
     for i = 1, (safe(C_QuestLog.GetNumQuestLogEntries) or 0) do
         local info = safe(C_QuestLog.GetInfo, i)
         local qid = info and not info.isHeader and info.questID
@@ -169,6 +201,131 @@ local function Build()
             }
         end
     end
+end
+
+-- Every quest tied to the item: qid -> "strong" | "text". Strong = the quest data says the quest needs
+-- it, hands it to you or is started by it (ForeverItemQuests / ForeverItemGiven), the game said so
+-- (the quest log linked it, it starts the quest), or VoidQuest saw it tied while the quest was in your
+-- log. Text = only the quest's story mentions it.
+local function Ties(id, starts)
+    local ties = {}
+    for qid, s in pairs((VoidQuestDB and VoidQuestDB.itemSeen and VoidQuestDB.itemSeen[id]) or {}) do
+        ties[qid] = (s == "strong") and "strong" or "text"
+    end
+    for qid, items in pairs((VoidQuestDB and VoidQuestDB.questItems) or {}) do
+        if items[id] then ties[qid] = "strong" end
+    end
+    for _, q in ipairs((VQ.ForeverItemQuests and VQ.ForeverItemQuests[id]) or {}) do ties[q] = "strong" end
+    for _, q in ipairs((VQ.ForeverItemGiven and VQ.ForeverItemGiven[id]) or {}) do ties[q] = "strong" end
+    if starts then ties[starts] = "strong" end
+    return ties
+end
+
+local function sortedKeys(t)
+    local out = {}
+    for k in pairs(t) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+
+-- The verdict for one quest item. starts = the quest it starts (from the bag slot), if known.
+local function Judge(id, name, starts)
+    local v
+    -- 1) a quest in your log needs it: always wins, before anything that could call it done
+    -- (Codex review). The quest data first (it needs the item or handed it to you), then what the
+    -- log itself shows (the linked item, an objective naming it, its text mentioning it).
+    local byData = {}
+    for _, q in ipairs((VQ.ForeverItemQuests and VQ.ForeverItemQuests[id]) or {}) do byData[q] = true end
+    for _, q in ipairs((VQ.ForeverItemGiven and VQ.ForeverItemGiven[id]) or {}) do byData[q] = true end
+    local lname = name:lower()
+    for _, q in ipairs(logQuests) do
+        local strong = byData[q.qid] or (q.linked == id) or (q.learned and q.learned[id]) or q.objItems[lname]
+        local mention = not strong and #lname >= 4 and q.text:find(lname, 1, true)
+        if strong or mention then
+            Seen(id, q.qid, strong and "strong" or "text")
+            v = v or { verdict = "keep", why = ("Needed for %s"):format(QuestTitle(q.qid)) }
+        end
+    end
+    -- 2) it starts a quest you can still do
+    if not v and starts and not Settled(starts) then
+        v = { verdict = "keep", why = ("Starts a quest: %s"):format(QuestTitle(starts)) }
+    end
+    -- 2b) a quest you haven't done (or can do again) needs it (any WoW Forever quest)
+    if not v then
+        local later = LaterQuests(id)
+        if later then
+            local lvl = MinLevel(later[1])
+            v = { verdict = "keep", later = later,
+                  why = ("Keep: for a later quest, %s%s"):format(QuestTitle(later[1]),
+                      lvl > 0 and (" (from level " .. lvl .. ")") or "") }
+        end
+    end
+    -- 2c) a quest that hands it to you isn't turned in (you took it and dropped it, or it's coming):
+    -- the giver may not hand out a second one
+    if not v then
+        for _, q in ipairs((VQ.ForeverItemGiven and VQ.ForeverItemGiven[id]) or {}) do
+            if not Settled(q) then
+                v = { verdict = "keep", later = { q },
+                      why = ("Keep: it comes with %s, which you haven't turned in"):format(QuestTitle(q)) }
+                break
+            end
+        end
+    end
+    -- 2d) chains the data can't see (KEEP above)
+    if not v and KEEP[id] then
+        local k = KEEP[id]
+        v = { verdict = "keep", how = k.why, later = (k.q and not Done(k.q)) and { k.q } or nil,
+              why = "Keep: " .. k.why .. ((k.q and not Done(k.q))
+                  and (" (quest: " .. QuestTitle(k.q) .. ")") or "") }
+    end
+    -- 3) nothing needs it now. "Safe to destroy" only when there's strong evidence AND every quest it
+    -- was ever tied to is settled: turned in for good, or one you can never take (an item tied to two
+    -- quests isn't done when only one is). Anything less: "unknown".
+    if not v and not IndexMissing() then   -- (no index: never "safe", Codex)
+        local ties = Ties(id, starts)
+        local anyStrong, allSettled, open = false, next(ties) ~= nil, nil
+        local doneQ, neverQ, neverWhy, n = nil, nil, nil, 0
+        for _, qid in ipairs(sortedKeys(ties)) do
+            n = n + 1
+            if ties[qid] == "strong" then anyStrong = true end
+            if DoneForGood(qid) then
+                if ties[qid] == "strong" then doneQ = doneQ or qid end
+            else
+                local never, why = Never(qid)
+                if never then
+                    if ties[qid] == "strong" and not neverQ then neverQ, neverWhy = qid, why end
+                else
+                    allSettled = false
+                    open = open or qid
+                end
+            end
+        end
+        if anyStrong and allSettled then
+            local more = n > 1 and (" (all %d quests that use it are settled)"):format(n) or ""
+            local why
+            if doneQ and starts and doneQ == starts then
+                why = ("Starts %s, which you've done"):format(QuestTitle(starts))
+            elseif doneQ then
+                why = ("Leftover: %s is turned in"):format(QuestTitle(doneQ))
+            else
+                why = ("Leftover: only for %s, which you can't take (%s)"):format(QuestTitle(neverQ), neverWhy)
+            end
+            v = { verdict = "done", why = why .. more }
+        elseif open then
+            v = { verdict = "unknown", why = (ties[open] == "strong" and "It was tied to %s, which isn't done"
+                or "The text of %s, which isn't done, mentions it"):format(QuestTitle(open)) }
+        end
+    end
+    v = v or { verdict = "unknown", why = "No quest found for this item" }
+    v.name = name
+    return v
+end
+
+local function Build()
+    dirty = false
+    missing = false
+    cache = {}
+    ScanLog()
     local last = (NUM_BAG_SLOTS or 4) + ((Constants and Constants.InventoryConstants and Constants.InventoryConstants.NumReagentBagSlots) or 0)
     for bag = 0, last do
         for slot = 1, (safe(C_Container.GetContainerNumSlots, bag) or 0) do
@@ -182,82 +339,34 @@ local function Build()
                 -- quest starters count even when not flagged as quest items (Codex review)
                 local isQuest = (qi and qi.isQuestItem) or starts or (ok and classID == QUEST_CLASS)
                 if isQuest and not name then missing = true end
-                if isQuest and name then
-                    local v
-                    -- 1) a quest in your log needs it: always wins, before anything that
-                    -- could call it done (Codex review)
-                    local lname = name:lower()
-                    for _, q in ipairs(logQuests) do
-                        local strong = (q.linked == id) or (q.learned and q.learned[id])
-                            or q.objItems[lname]
-                        local mention = not strong and #lname >= 4 and q.text:find(lname, 1, true)
-                        if strong or mention then
-                            Seen(id, q.qid, strong and "strong" or "text")
-                            v = v or { verdict = "keep", why = ("Needed for %s"):format(QuestTitle(q.qid)) }
-                        end
-                    end
-                    -- 2) it starts a quest you haven't done
-                    if not v and starts and not Done(starts) then
-                        v = { verdict = "keep", why = ("Starts a quest: %s"):format(QuestTitle(starts)) }
-                    end
-                    -- 2b) a quest you haven't picked up yet needs it (any WoW Forever quest)
-                    if not v then
-                        local later = LaterQuests(id)
-                        if later then
-                            local lvl = MinLevel(later[1])
-                            v = { verdict = "keep", later = later,
-                                  why = ("Keep: for a later quest, %s%s"):format(QuestTitle(later[1]),
-                                      lvl > 0 and (" (from level " .. lvl .. ")") or "") }
-                        end
-                    end
-                    -- 2c) chains the data can't see (KEEP above)
-                    if not v and KEEP[id] then
-                        local k = KEEP[id]
-                        v = { verdict = "keep", how = k.why, later = (k.q and not Done(k.q)) and { k.q } or nil,
-                              why = "Keep: " .. k.why .. ((k.q and not Done(k.q))
-                                  and (" (quest: " .. QuestTitle(k.q) .. ")") or "") }
-                    end
-                    -- 3) nothing needs it now. "Safe to destroy" only when the evidence is
-                    -- strong AND every quest it was ever tied to is turned in (an item tied
-                    -- to two quests isn't done when only one is). Anything less: "unknown".
-                    if not v then
-                        local ties = {}
-                        for qid, s in pairs((VoidQuestDB and VoidQuestDB.itemSeen and VoidQuestDB.itemSeen[id]) or {}) do
-                            ties[qid] = (s == "strong") and "strong" or "text"
-                        end
-                        for qid, items in pairs((VoidQuestDB and VoidQuestDB.questItems) or {}) do
-                            if items[id] then ties[qid] = "strong" end
-                        end
-                        if starts then ties[starts] = "strong" end
-                        local anyStrong, allDone, named = false, next(ties) ~= nil, nil
-                        for qid, s in pairs(ties) do
-                            if s == "strong" then anyStrong = true; named = named or qid end
-                            if not DoneForGood(qid) then allDone = false end
-                        end
-                        if anyStrong and allDone and not IndexMissing() then   -- (no index: never "safe", Codex)
-                            v = { verdict = "done", why = (starts and named == starts)
-                                and ("Starts %s, which you've done"):format(QuestTitle(starts))
-                                or ("Leftover: %s is turned in"):format(QuestTitle(named)) }
-                        end
-                    end
-                    v = v or { verdict = "unknown", why = "No quest found for this item" }
-                    v.name = name
-                    cache[id] = v
-                end
+                if isQuest and name then cache[id] = Judge(id, name, starts) end
             end
         end
     end
 end
 
--- Verdict for an item in your bags: "keep" | "done" | "unknown" (nil = not a quest
--- item, or not in your bags), plus the reason. Used by VoidBags.
+-- Verdict for a quest item: "keep" | "done" | "unknown" (nil = not a quest item), plus the reason.
+-- Items in your bags are judged with what the bag slot tells (the quest it starts); anything else (the
+-- bank, a link) the same way from the data, so its tooltip says it too. Used by VoidBags.
 local function Verdict(itemID)
-    if not itemID then return nil end
+    if not itemID or (issecretvalue and issecretvalue(itemID)) then return nil end
     if dirty then Build() end
     local v = cache[itemID]
+    if v == nil then
+        local ok, _, _, _, _, _, classID = pcall(C_Item.GetItemInfoInstant, itemID)
+        if not (ok and classID == QUEST_CLASS) then
+            cache[itemID] = false
+            return nil
+        end
+        local name = safe(C_Item.GetItemInfo, itemID)
+        if not name then missing = true; return nil end
+        v = Judge(itemID, name, nil)
+        cache[itemID] = v
+    end
     if v then return v.verdict, v.why end
     return nil
 end
+
 
 VQ.Leftovers = { Verdict = Verdict, Refresh = function() dirty = true end }
 -- the public hook other addons look for
@@ -268,7 +377,9 @@ VQ.LeftoversList = function()
     Build()
     local done, unknown, keep = {}, {}, 0
     for _, v in pairs(cache) do
-        if v.verdict == "done" then done[#done + 1] = v
+        if not v then
+            -- not a quest item (looked up from a tooltip)
+        elseif v.verdict == "done" then done[#done + 1] = v
         elseif v.verdict == "unknown" then unknown[#unknown + 1] = v
         else keep = keep + 1 end
     end
