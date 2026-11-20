@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.43 — 2026-11-20
+
+- **Quest mob spots and quest givers updated with what VoidQuest players found (WoW Forever).** 3,175 mob spots are now measured by players instead of taken from outside data (8.3%, up from 6.3%), 17 mobs players found counting for a quest were added, and 14% of quest givers are now player-measured (up from 12%).
+- **Summon quests: the object first (WoW Forever).** For quests where you do something at an object before the target shows up, the route's first stop is that object: the Ruined Lifeboat before Negolash, the Seal of the Earth before its boss, Eliza's grave. With VoidGPS, searching the quest takes you there too, then to the boss once you've used it.
+
 ## 0.3.42 — 2026-11-19
 
 - **The zone suggestion no longer looks like a quest you're on (WoW Forever).** The line under the zone name now reads "! Not taken yet: Stranglethorn Fever from Witch Doctor Unbagwa" with the quest name in white, not the green of the quests in your log. With nothing to suggest it says so in grey.

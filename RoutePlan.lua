@@ -146,6 +146,19 @@ local function objectiveSpots(qid)
         nd.refs[#nd.refs + 1] = r
     end
     local out = {}
+    -- an object you use first, before the target shows up (ForeverSteps: the Ruined Lifeboat before Negolash;
+    -- the user, 2026-11-20: "takes somebody to the boat first and then pop up the boss"). It's the first stop
+    -- until an objective is done; a target spawning near it joins that stop, so the pin sits on the object.
+    local st = VQ.ForeverSteps and VQ.ForeverSteps[qid]
+    if st then
+        local anyDone = false
+        for _, o in ipairs(objs) do if o.finished then anyDone = true end end
+        local m, s = next(st.spots or {})
+        if not anyDone and m and type(s) == "string" and #s >= 6 then
+            out[1] = { map = m, x = (tonumber(s:sub(1, 3)) or 0) / 1000, y = (tonumber(s:sub(4, 6)) or 0) / 1000,
+                       what = st.name .. " first" }
+        end
+    end
     for _, key in ipairs(order) do
         local nd = needs[key]
         if not finished(nd.name) then
