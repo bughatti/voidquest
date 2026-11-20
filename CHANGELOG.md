@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.44 — 2026-11-20
+
+- **More quests know where they start and end (WoW Forever).** The quest data now has WoW Forever's newest content, including the Alcaz Prison chain (More Valuable Than Gold ends at Connery's Trunk in Westfall): 4,416 quests with a known giver (was 3,791), 6,289 chain links (was 5,403), and more mob spots. Plus what VoidQuest players measured, Horde and Alliance: 3,207 mob spots and 644 quest givers.
+- Fixed: 19 quests had lost the names of their rewards.
+
 ## 0.3.43 — 2026-11-20
 
 - **Quest mob spots and quest givers updated with what VoidQuest players found (WoW Forever).** 3,175 mob spots are now measured by players instead of taken from outside data (8.3%, up from 6.3%), 17 mobs players found counting for a quest were added, and 14% of quest givers are now player-measured (up from 12%).
