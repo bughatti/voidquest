@@ -1,5 +1,11 @@
 # VoidQuest Changelog
 
+## 0.3.45 — 2026-11-20
+
+- **The guide says how to do a quest (WoW Forever).** Under a quest in your log: where what it asks for comes from (and when that's inside a dungeon), "Do it alone: leave your group" for quests you must do alone, who to bring it to, and the quest that comes next. Built for The Talisman of Kazdor, for every quest (3,505).
+- **No "!" for quest givers who won't talk to you yet (WoW Forever).** 128 more quests know the reputation they need, from Blizzard's own quest data: the Timbermaw quests in Azshara (Furze, Elder Bramblesnap, Gatekeeper Rageroar) now say "Needs Neutral with Timbermaw Hold" instead of showing a "!" at a hostile giver.
+- **Fewer quests of the other faction.** 68 more quests are known to be for one faction only (from Blizzard's data, or because every NPC who gives them serves one side), so they no longer show to the other.
+
 ## 0.3.44 — 2026-11-20
 
 - **More quests know where they start and end (WoW Forever).** The quest data now has WoW Forever's newest content, including the Alcaz Prison chain (More Valuable Than Gold ends at Connery's Trunk in Westfall): 4,416 quests with a known giver (was 3,791), 6,289 chain links (was 5,403), and more mob spots. Plus what VoidQuest players measured, Horde and Alliance: 3,207 mob spots and 644 quest givers.

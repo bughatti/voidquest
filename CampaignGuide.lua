@@ -4663,6 +4663,19 @@ function mod:Refresh()
             local more = #r.pool - (r.isZone and 1 or 0)
             if more > 0 then obj = obj .. (obj ~= "" and "  " or "") .. ("|cff888888(+%d in-scope)|r"):format(more) end
         end
+        -- How to, for a quest you have (ForeverHow.lua, WoW Forever): where what it asks for comes from (inside a
+        -- dungeon?), whether you must go alone, who takes it, what comes next. The user, 2026-11-20, alone in
+        -- Zul'Farrak on The Talisman of Kazdor: "our guide doesnt really help me figure out what to do".
+        if step.status ~= "pickup" then
+            local hw = VQ.ForeverHow and VQ.ForeverHow[step.qid]
+            local bits = {}
+            if hw and hw.f then bits[#bits + 1] = "From: " .. hw.f end
+            if hw and hw.a then bits[#bits + 1] = "|cffff8800Do it alone: leave your group|r" end
+            if step.status == "progress" and taker then bits[#bits + 1] = "Then: " .. taker end
+            local nt = hw and hw.n and VQ.ForeverQuests and VQ.ForeverQuests[hw.n]
+            if type(nt) == "table" and type(nt[1]) == "string" then bits[#bits + 1] = "Next: " .. nt[1] end
+            if #bits > 0 then obj = obj .. (obj ~= "" and "\n" or "") .. "|cffd0d0d0" .. table.concat(bits, " · ") .. "|r" end
+        end
         if who then obj = ("|cffffffff%s|r"):format(who) .. (obj ~= "" and "  " .. obj or "") end
         -- an escort's giver can be away on someone else's escort (WoW Forever, 2026-11-11)
         local esc = step.status == "pickup" and VQ.Forever and VQ.Forever.EscortNote and VQ.Forever:EscortNote(step.qid)
