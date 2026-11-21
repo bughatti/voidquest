@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.46 — 2026-11-20
+
+- **Quest givers in English.** Some quest givers learned from other players showed in Spanish ("Tabernero Farley" for Innkeeper Farley). Every name now comes from the NPC itself, in English.
+- **More Alliance quest givers and mob spots (WoW Forever).** About 170 quests got a better giver, spot or turn-in from Alliance players, and more quest mobs are where players actually found them.
+
 ## 0.3.45 — 2026-11-20
 
 - **The guide says how to do a quest (WoW Forever).** Under a quest in your log: where what it asks for comes from (and when that's inside a dungeon), "Do it alone: leave your group" for quests you must do alone, who to bring it to, and the quest that comes next. Built for The Talisman of Kazdor, for every quest (3,505).
