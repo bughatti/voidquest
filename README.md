@@ -153,6 +153,7 @@ VoidQuest shows one small panel with the next thing to do and pins it on your ma
 - **WoW Midnight** 12.1.5 (Season 2)
 - **WoW Forever**
 - Works with VoidGather and VoidSweep (shared players online box), and with the rest of the Void addons.
+- **Works next to Questie.** What both would draw shows once: while Questie runs, its "!" on the map, objective icons on the minimap, quest mob icons and NPC tooltip lines are left to it, and VoidQuest never fights its tracker over Blizzard's. Turn off Questie's "Available Normal Quests" (Questie → Icons) and VoidQuest draws the "!" instead, with fewer of them on Mid.
 
 ---
 

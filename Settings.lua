@@ -29,12 +29,41 @@ VQ.SettingsDefaults = {
     -- WoW Forever group-up (GroupUp.lua) and LFG for elite quests (QuestLFG.lua): on unless turned
     -- off. Without these the boxes showed unticked while the features ran (found 2026-11-19).
     groupAsks = true, groupArrival = true, questLfgAlert = true,
+    yieldToQuestie = true,   -- Questie running: it draws the "!", objective icons, plate marks, tooltip lines
 }
 
 function VQ:Get(key)
     local v = VoidQuestDB and VoidQuestDB[key]
     if v == nil then return VQ.SettingsDefaults[key] end
     return v
+end
+
+-- Questie next to us (the user, 2026-11-21: "make sure our quest addons dont collide"). What Questie already
+-- draws (map "!", minimap objective icons, nameplate marks, NPC tooltip quest lines), VoidQuest leaves to it,
+-- so nothing shows twice. Only while Questie really runs (it sets Questie.started once its start-up worked)
+-- and has every named option on. VoidQuestDB.yieldToQuestie = false draws ours anyway.
+function VQ:QuestieProfile()
+    local q = _G.Questie
+    local p = type(q) == "table" and q.started and q.db and q.db.profile
+    return type(p) == "table" and p or nil
+end
+function VQ:QuestieDoes(...)
+    if VQ:Get("yieldToQuestie") == false then return false end
+    local p = VQ:QuestieProfile()
+    -- "Hide Questie" (its minimap button) clears profile.enabled and takes its icons away: ours come back
+    if not p or p.enabled == false then return false end
+    for i = 1, select("#", ...) do
+        if not p[(select(i, ...))] then return false end
+    end
+    return true
+end
+
+-- Questie's tracker hides Blizzard's for good (even when the rest of its start-up failed): then VoidQuest
+-- never shows or hides Blizzard's tracker, or the two flip it back and forth.
+function VQ:QuestieOwnsTracker()
+    local q = _G.Questie
+    local p = type(q) == "table" and q.db and q.db.profile
+    return type(p) == "table" and p.trackerEnabled and true or false
 end
 
 function VQ:Set(key, val)

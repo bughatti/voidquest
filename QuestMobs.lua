@@ -276,7 +276,8 @@ end
 
 function M:UpdateMinimap()
     nActive = 0
-    if not Enabled() then hideRest(); return end
+    -- Questie puts every objective on the minimap: our dots for the tracked quest would sit on top of its icons
+    if not Enabled() or VQ:QuestieDoes("enableMiniMapIcons", "enableObjectives") then hideRest(); return end
     local mapID = C_Map.GetBestMapForUnit("player")
     local ppos = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
     local w, h
@@ -673,7 +674,11 @@ local function Mark(unit)
         -- pale blue = a rare that isn't.
         icon:SetTexture("Interface\\Cursor\\Attack")
         if quests then icon:SetVertexColor(1, 0.85, 0.2, 1) else icon:SetVertexColor(0.6, 0.8, 1, 1) end
-        icon:Show()
+        -- Questie marks quest mobs on their plate too, rares included (not in instances): its icon, not a
+        -- second one. A rare that's no quest mob keeps ours (Questie doesn't mark those). Learning the spot
+        -- below goes on either way.
+        local questieMarks = quests and VQ:QuestieDoes("nameplateEnabled") and not IsInInstance()
+        icon:SetShown(not questieMarks)
         inView[unit] = { name = name or "?", quests = quests, rare = rare }
         local npc = NpcID(unit)
         if npc and name then Sight(unit, npc, name, quests) end

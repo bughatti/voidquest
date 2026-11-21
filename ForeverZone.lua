@@ -1104,6 +1104,9 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
         return mi and mi.parentMapID == mapID and mi.mapType ~= ZONE_MAP and true or false
     end
     local waiting = false
+    -- Questie draws the plain "!" itself: then only ours that it doesn't have (the orange "goes with a quest in
+    -- your log" bang, bigger, on top of its "!", and the grey "do an earlier quest first")
+    local questieBangs = VQ:QuestieDoes("enableMapIcons", "enableAvailable", "showAvailableQuests")
     for id, r in pairs(VQ.ForeverQuests or {}) do
         local s = F:Spot(id)
         -- Min / Mid / Max, or a quest that goes with one in your log (Companions.lua: shown whatever the tier)
@@ -1117,6 +1120,7 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
         -- (the user, 2026-11-11: "a different icon for quests ... not available bec the start
         -- quest is somewhere else and to say go get it")
         local later = here and not avail and first and first ~= id and VQ:Get("foreverPinsLater") ~= false
+        if ok and questieBangs and not (VQ.Companions and VQ.Companions:Of(id)) then ok = false end
         if ok or later then
             local x, y = s.x, s.y
             if s.m ~= mapID then
@@ -1197,6 +1201,8 @@ end
 local NPC_LINES = 4
 local function NpcTooltip(tt)
     if tt ~= GameTooltip or not F:Active() then return end
+    -- Questie lists a giver's quests and turn-ins on the same tooltip: once is enough
+    if VQ:QuestieDoes("enableTooltips", "showQuestsInNpcTooltip") then return end
     local _, unit = tt:GetUnit()
     if not unit or UnitIsPlayer(unit) or (UnitCanAttack and UnitCanAttack("player", unit)) then return end
     local name = UnitName(unit)

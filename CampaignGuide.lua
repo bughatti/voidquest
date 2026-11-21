@@ -2875,6 +2875,7 @@ function mod:ApplyBlizzTracker()
         -- 2026-10-24). So in combat it goes fully transparent instead (SetAlpha isn't
         -- protected); after combat ApplyBlizzTracker hides it properly and restores alpha.
         local function enforce(s)
+            if VQ:QuestieOwnsTracker() then return end   -- Questie's tracker hides it; never fight over it
             local inInst = blizzTrackerNeeded()
             local hide = (inInst and mod._instanceHide)
                 or (not inInst and VQ:Get("blizzTracker") == false)
@@ -2903,6 +2904,12 @@ function mod:ApplyBlizzTracker()
             end
             C_Timer.After(0.5, function() mod:ApplyBlizzTracker() end)
         end)
+    end
+    -- Questie's own tracker hides Blizzard's (SetAlpha 0 + Hide + an OnShow hook): showing it again here made
+    -- the two flip it every refresh. Leave it to Questie (the user, 2026-11-21).
+    if VQ:QuestieOwnsTracker() then
+        if self._otfFaded then self._otfFaded = nil end
+        return
     end
     if InCombatLockdown and InCombatLockdown() then
         if not want and otf:IsShown() then otf:SetAlpha(0); self._otfFaded = true end
@@ -5382,10 +5389,40 @@ do
             remember(safe(GetQuestID), "turnin", event == "QUEST_COMPLETE")
         end
         if not mod:AutoEnabled() then return end
+        -- Questie's own auto accept / turn-in on as well: it clicks the same window, so VoidQuest leaves
+        -- that half to it (two addons clicking one quest window = double clicks). Off in Questie by default.
+        local qp = VQ:QuestieProfile()
+        local qAccept = qp and type(qp.autoAccept) == "table" and qp.autoAccept.enabled
+        local qTurnIn = qp and qp.autocomplete
+        local myAccept = VQ:Get("autoAccept") and not qAccept
+        local myTurnIn = VQ:Get("autoTurnIn") and not qTurnIn
+        if not (myAccept or myTurnIn) then return end
+        -- the NPC's list: when Questie will pick a line from it (its auto turn-in and a finished quest here,
+        -- or its auto accept and a quest on offer), we don't pick a different one in the same window. When it
+        -- won't (its accept on, only a finished quest here), ours still does its half (Codex, 2 passes).
+        if event == "GOSSIP_SHOW" and (qAccept or qTurnIn) then
+            -- Questie's own accept filters (AutoQuesting.OnGossipShow): grey quests only with its "trivial",
+            -- repeatable ones only with "repeatable" (its PvP filter needs its database: counted as a pick)
+            local questiePicks = false
+            if qAccept then
+                local aa = qp.autoAccept
+                for _, q in ipairs(safe(C_GossipInfo.GetAvailableQuests) or {}) do
+                    if (aa.trivial or not q.isTrivial) and (aa.repeatable or not q.repeatable) then
+                        questiePicks = true; break
+                    end
+                end
+            end
+            if qTurnIn and not questiePicks then
+                for _, q in ipairs(safe(C_GossipInfo.GetActiveQuests) or {}) do
+                    if q.isComplete then questiePicks = true; break end
+                end
+            end
+            if questiePicks then return end
+        end
         local set, campID = mod:ChainSet()
         if event == "GOSSIP_SHOW" then
             -- 1) turn in a COMPLETED campaign quest at this NPC
-            if VQ:Get("autoTurnIn") then
+            if myTurnIn then
                 for _, q in ipairs(safe(C_GossipInfo.GetActiveQuests) or {}) do
                     if q.isComplete and mod:Owns(q.questID, set, campID) then
                         announce("Turning in |cff55ff55%s|r", q.title or ("quest " .. q.questID))
@@ -5394,7 +5431,7 @@ do
                 end
             end
             -- 2) else pick up an AVAILABLE campaign quest (incl. the next chapter's)
-            if VQ:Get("autoAccept") then
+            if myAccept then
                 for _, q in ipairs(safe(C_GossipInfo.GetAvailableQuests) or {}) do
                     if mod:Owns(q.questID, set, campID) then
                         announce("Picking up |cff55ff55%s|r", q.title or ("quest " .. q.questID))
@@ -5404,10 +5441,10 @@ do
             end
         elseif event == "QUEST_PROGRESS" then
             local qid = safe(GetQuestID)
-            if VQ:Get("autoTurnIn") and mod:Owns(qid, set, campID) and safe(IsQuestCompletable) then CompleteQuest() end
+            if myTurnIn and mod:Owns(qid, set, campID) and safe(IsQuestCompletable) then CompleteQuest() end
         elseif event == "QUEST_COMPLETE" then
             local qid = safe(GetQuestID)
-            if VQ:Get("autoTurnIn") and mod:Owns(qid, set, campID) then
+            if myTurnIn and mod:Owns(qid, set, campID) then
                 local choices = safe(GetNumQuestChoices) or 0
                 if choices >= 2 and VQ:Get("pauseOnChoice") then
                     VQ:Print("|cffffd200Pick your reward|r for |cff55ff55" .. (safe(GetTitleText) or "this quest") .. "|r -- auto-turn-in paused (choice quest).")
@@ -5420,7 +5457,7 @@ do
             end
         elseif event == "QUEST_DETAIL" then
             local qid = safe(GetQuestID)
-            if VQ:Get("autoAccept") and mod:Owns(qid, set, campID) then
+            if myAccept and mod:Owns(qid, set, campID) then
                 announce("Accepting |cff55ff55%s|r", safe(GetTitleText) or "quest")
                 AcceptQuest()
             end

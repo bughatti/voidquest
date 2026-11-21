@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.47 — 2026-11-21
+
+- **Works next to Questie.** With Questie running, the map "!", minimap objective dots, quest mob icons on nameplates and NPC tooltip quest lines show once (Questie's), the two no longer flip Blizzard's quest tracker on and off, and auto accept / turn-in never clicks the same quest window as Questie's. Turn off Questie's "Available Normal Quests" and VoidQuest draws the "!" again; "Hide Questie" brings all of VoidQuest's marks back.
+
 ## 0.3.46 — 2026-11-20
 
 - **Quest givers in English.** Some quest givers learned from other players showed in Spanish ("Tabernero Farley" for Innkeeper Farley). Every name now comes from the NPC itself, in English.
