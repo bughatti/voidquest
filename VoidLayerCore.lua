@@ -331,7 +331,10 @@ function ns.LayerCoreBuild(owner)
     function C:Label(zone, pair)
         pair = canon(pair)
         if not validPair(pair) then return pair or "?" end
-        return "Layer " .. pair:match("^(%d+)")
+        local n = tonumber(pair:match("^(%d+)"))
+        -- names since 2026-11-24 (Layer.lua v2) are 6 random digits: 3 are enough to tell a zone's few apart
+        if n and n >= 100000 then n = n % 900 + 100 end
+        return "Layer " .. tostring(n)
     end
     function C:Here() return Layer:Here() end
     function C:Current(zone) return Layer:Current(zone) end
@@ -470,7 +473,7 @@ function ns.LayerCoreBuild(owner)
         if not npc or secret(name) or not validName(name) then return end
         local zone = Layer:Zone(C_Map.GetBestMapForUnit("player"))
         if not zone then return end
-        local pair = Layer:Current(zone) or (server and shard and canon(server .. "-" .. shard))
+        local pair = Layer:Current(zone) or (Layer:Here())
         if not validPair(pair) then return end
         local dead = UnitIsDead(unit) and true or false
         local hp = 0
@@ -624,16 +627,27 @@ function ns.LayerCoreBuild(owner)
         changed()
     end
 
-    Layer:OnChange(function(pair, zone)
+    Layer:OnChange(function(pair, zone, how)
         C:Label(zone, pair)
+        if how == "moved" or how == "hop" then C.movedAtS = C.movedAtS or {}; C.movedAtS[zone] = GetServerTime() end
+        -- a merge (the game placed you with someone) or a restore is a new NAME for the same layer, not a move
+        if state and zone == state.zone and (how == "merged" or how == "kept" or how == "hop" or how == "entered") then
+            if state.phase == "left" then state.pair = pair else state.from = pair end
+            changed()
+            return
+        end
         if state and zone == state.zone then
             -- In the host's group, ANY move off the layer you came from is the hop: joining puts you on
             -- the group's layer, and the layer the host reported can be stale. First real hop (the user,
             -- 2026-11-10, The Barrens): A 7054-28 -> joined -> 7054-29 at once, but the host had reported
             -- another id ("Layer B"), so the check waited for B, never finished and never left the group.
             if state.phase == "joined" and pair ~= state.from then
-                state.pair = pair
+                -- the game moved you while in the host's group: you're on the host's layer, so take its
+                -- name (the one it just sent with HP, else the one it reported) instead of a new one
+                local hostPair = state.hostPair or state.pair
+                state.pair = hostPair
                 moved()
+                Layer:Adopt(zone, hostPair, "hop")
             elseif state.phase == "left" and pair ~= state.pair then
                 S().hopStay = true
                 C.hlog("reverted", state)
@@ -643,12 +657,44 @@ function ns.LayerCoreBuild(owner)
         changed()
     end)
 
+    -- What the game says about other players (Layer.lua v2, 2026-11-24): a Void player you can see, or a group
+    -- member the game puts on your layer, holds your layer's name from now on (both take the lower one); one the
+    -- game puts on another layer is proven different. Census and rares follow every merge.
+    if Layer.OnPlayer then
+        C.lq = {}   -- [name] = { zone, t }: we asked that player its layer's name (LQ) and wait for LA
+        Layer:OnPlayer(function(name, zone, same)
+            local who = Net.Canon(name)
+            if not who or secret(who) or who == me then return end
+            local a = census[zone] and census[zone][who]
+            if same then
+                -- the game says this player is on your layer NOW, but a census name may be the layer it left
+                -- (Sol review): ask its current name (LQ, a Void player only); both then take the lower one
+                if not isPeer(who) then return end
+                local cur = Layer:Current(zone)
+                if not cur then return end
+                C.lq[who] = { zone = zone, t = now(), gen = Layer:Gen(zone) }
+                send(("LQ:1:%d:%s:%d"):format(zone, cur, GetServerTime()), who, true)
+            elseif a and now() - a.t <= 120 then
+                Layer:Different(zone, a.pair)
+                changed()
+            end
+        end)
+        Layer:OnMerge(function(zone, old, new)
+            for _, a in pairs(census[zone] or {}) do if a.pair == old then a.pair = new end end
+            for _, r in pairs(rares) do if r.zone == zone and r.pair == old then r.pair = new end end
+            changed()
+        end)
+    end
+
     local function checkMove()
         if not (state and state.phase == "joined") then return end
         local cur = Layer:Current(state.zone)
         if cur and cur ~= state.from then
-            state.pair = cur   -- moved off your layer: that's the hop, whatever id the host reported
+            -- moved off your layer: that's the hop; take the host's name (Layer.lua v2)
+            local zone, hostPair = state.zone, state.hostPair or state.pair
+            state.pair = hostPair
             moved()
+            Layer:Adopt(zone, hostPair, "hop")
         elseif state.anyPair and cur then
             local host = state.host
             stop(("test: you joined but stayed on %s, so %s was on your layer already. Leaving the group."):format(C:Label(state.zone, cur), host))
@@ -675,6 +721,11 @@ function ns.LayerCoreBuild(owner)
         if not state then return end
         state.idx = state.idx + 1
         local h = state.hosts[state.idx]
+        -- a helper since found on YOUR layer (a same-layer invite, or the game placing you together): skip
+        while h and Layer:Alias(state.zone, h.pair) == Layer:Current(state.zone) do
+            state.idx = state.idx + 1
+            h = state.hosts[state.idx]
+        end
         if not h then
             -- say why, else a failed Hop looks broken (the user, 2026-11-15, Durotar: two Hops to a
             -- rare's layer, both "nobody could bring you over", no reason)
@@ -694,7 +745,7 @@ function ns.LayerCoreBuild(owner)
                 or "nobody on that layer could bring you over right now. Try again in a bit.")
             return
         end
-        state.host, state.pair, state.phase, state.extended, state.seenHost = h.name, h.pair, "asking", nil, nil
+        state.host, state.pair, state.phase, state.extended, state.seenHost, state.hostPair = h.name, h.pair, "asking", nil, nil, nil
         state.nonce = tostring(math.random(100000, 999999))
         send(("HR:1:%d:%s:%s"):format(state.zone, (rawOf[h.name] and canon(rawOf[h.name]) == state.pair) and rawOf[h.name] or state.pair, state.nonce), h.name, true)
         local asked1 = h.name
@@ -702,6 +753,10 @@ function ns.LayerCoreBuild(owner)
             if state and state.phase == "asking" and state.host == asked1 then
                 state.why = state.why or {}
                 state.why.none = (state.why.none or 0) + 1
+                -- no answer: not offered as a helper again until they report in (the user, 2026-11-21: "if that
+                -- player is no longer reachable, it should go away")
+                local a = census[state.zone] and census[state.zone][asked1]
+                if a then a.host = false; changed() end
                 nextHost()
             end
         end)
@@ -778,7 +833,7 @@ function ns.LayerCoreBuild(owner)
             changed()
             return
         end
-        state = { zone = zone, from = cur, hosts = hosts, idx = 0, t0 = now() }
+        state = { zone = zone, from = cur, hosts = hosts, idx = 0, t0 = now(), want = pair }
         C.hlog("start", { zone = zone })   -- one per hop, however many helpers it asks (Sol review)
         say(("asking a Void player on %s to bring you over..."):format(pair and self:Label(zone, pair) or "another layer"))
         nextHost()
@@ -856,6 +911,7 @@ function ns.LayerCoreBuild(owner)
             pair = canon(pair)   -- an older version sends "<server>-<its own number>"
             local zone = validZone(zoneS)
             if not (zone and validPair(pair)) then return end
+            pair = Layer:Alias(zone, pair)   -- a name we merged away since
             if not (asked[zone] and now() - asked[zone] <= ANSWER_WINDOW) or not isPeer(who) then return end
             census[zone] = census[zone] or {}
             census[zone][who] = { pair = pair, host = h == "1", t = now() }
@@ -873,7 +929,7 @@ function ns.LayerCoreBuild(owner)
             if not (zone and validPair(pair) and n and n >= 1 and n <= 999) then return end
             if not (asked[zone] and now() - asked[zone] <= ANSWER_WINDOW) or not isPeer(who) then return end
             local a = census[zone] and census[zone][who]
-            if not (a and a.pair == pair) then return end
+            if not (a and a.pair == Layer:Alias(zone, pair)) then return end
             a.seen = n
             changed()
         elseif tag == "R" then
@@ -886,6 +942,7 @@ function ns.LayerCoreBuild(owner)
             if not (zone and ttl and ttl <= 2 and validPair(pair) and npc and npc < 10000000 and hp and hp <= 100
                     and x and x <= 1000 and y and y <= 1000 and validName(origin) and validName(name)) then return end
             if origin == me or not isPeer(who) then return end
+            pair = Layer:Alias(zone, pair)
             noteRaw(origin, rawR)
             if storeRare(zone, pair, npc, hp, x, y, origin, name) then
                 if ttl > 0 then
@@ -902,12 +959,14 @@ function ns.LayerCoreBuild(owner)
             pa, pb = canon(pa), canon(pb)
             if not (za and zb and za ~= zb and validPair(pa) and validPair(pb) and age and age <= 3 * 3600) then return end
             if not isPeer(who) or not onLink then return end
+            pa, pb = Layer:Alias(za, pa), Layer:Alias(zb, pb)   -- names merged away since (Sol review)
             onLink(za, pa, zb, pb, who, now() - age)
         elseif tag == "C" then
             -- a camp cleared (section 5): zone, layer, grid cell, seconds ago; never relayed
             local zoneS, pair, cx, cy, age = msg:match("^C:1:(%d+):(%d+%-%d+):(%d+):(%d+):(%d+)$")
             pair = canon(pair)
             local zone = validZone(zoneS)
+            if zone and validPair(pair) then pair = Layer:Alias(zone, pair) end   -- a merged-away name (Sol review)
             if zone and validPair(pair) and isPeer(who) and onCamp then onCamp(zone, pair, tonumber(cx), tonumber(cy), tonumber(age)) end
         elseif tag == "HR" then
             local zoneS, pair, nonce = msg:match("^HR:1:(%d+):(%d+%-%d+):(%d+)$")
@@ -917,13 +976,63 @@ function ns.LayerCoreBuild(owner)
             if not C:HostingOn() then reply("no:off") return end
             if not C:CanHost() then reply("no:busy") return end
             local cur, zone = Layer:Here()
-            if zone ~= tonumber(zoneS) or cur ~= pair then reply("no:layer") return end
+            if zone ~= tonumber(zoneS) or Layer:Alias(zone, pair) ~= cur then reply("no:layer") return end
             lastHosted = now()
             hostedTimes[#hostedTimes + 1] = lastHosted
             hosting = { guest = who, nonce = nonce, invited = now(), deadline = now() + HOST_STAY }
             C_PartyInfo.InviteUnit(who)
             reply("ok")
+            -- our layer's name, so a guest who moves takes it (an older guest ignores HP)
+            send(("HP:1:%s:%s"):format(nonce, cur), who, true)
             say(("inviting %s to bring them to your layer (a layer hop; the group ends on its own)."):format(who))
+        elseif tag == "LQ" then
+            -- a Void player whose game just put us on one layer (it sees us, or we're grouped): one name for it,
+            -- the lower; the answer tells it which (2026-11-24, Layer.lua v2)
+            local zoneS, pair, sentS = msg:match("^LQ:1:(%d+):(%d+%-%d+):(%d+)$")
+            local zone = validZone(zoneS)
+            pair, sentS = canon(pair), tonumber(sentS)
+            if not (zone and validPair(pair) and sentS) or not isPeer(who) then return end
+            local _, here = Layer:Here()
+            if here ~= zone then return end
+            -- the asker's game saw us together at sentS (server time, the same clock for both): too old, or we
+            -- moved since (or just before), and it's about a layer we left (Sol reviews 2 and 3)
+            local nowS = GetServerTime()
+            if math.abs(nowS - sentS) > 10 then return end
+            C.movedAtS = C.movedAtS or {}
+            if C.movedAtS[zone] and C.movedAtS[zone] >= sentS - 2 then return end
+            local lo = Layer:Merge(zone, pair)
+            if not lo then return end
+            local a = census[zone] and census[zone][who]
+            if a then a.pair = lo end
+            send(("LA:1:%d:%s"):format(zone, lo), who, true)
+            changed()
+        elseif tag == "LA" then
+            local zoneS, pair = msg:match("^LA:1:(%d+):(%d+%-%d+)$")
+            local zone = validZone(zoneS)
+            pair = canon(pair)
+            local q = C.lq and C.lq[who]
+            if not (zone and validPair(pair) and q and q.zone == zone and now() - q.t <= 15) then return end
+            C.lq[who] = nil
+            -- moved since we asked: the answer is about the layer we left (Sol review)
+            if q.gen ~= Layer:Gen(zone) then return end
+            local lo = Layer:Merge(zone, pair)
+            local a = census[zone] and census[zone][who]
+            if a and lo then a.pair = lo end
+            changed()
+        elseif tag == "HP" then
+            -- the host's layer name, sent with its ok (2026-11-24)
+            local nonce, pair = msg:match("^HP:1:(%d+):(%d+%-%d+)$")
+            if state and nonce == state.nonce and who == state.host and validPair(canon(pair)) then state.hostPair = canon(pair) end
+        elseif tag == "HN" then
+            -- the guest's game said our invite was "same layer": it declined, and we're on one layer
+            local nonce, pair = msg:match("^HN:1:(%d+):(%d+%-%d+)$")
+            if hosting and hosting.guest == who and nonce == hosting.nonce then
+                local _, zone = Layer:Here()
+                if zone and validPair(canon(pair)) then Layer:Merge(zone, canon(pair)) end
+                C.hlog("hostSame")
+                hosting = nil
+                changed()
+            end
         elseif tag == "HS" then
             local nonce = msg:match("^HS:1:(%d+)$")
             -- a nonce is required, and a Group Finder guest never extends its stay (Sol review 2026-11-16)
@@ -938,6 +1047,9 @@ function ns.LayerCoreBuild(owner)
                 local k = answer:match("^no:(%a+)$")
                 k = (k == "busy" or k == "layer" or k == "off") and k or "busy"
                 if k == "off" then C.offNames[who] = GetTime() end   -- not counted as a Layer helper for an hour
+                -- busy / off: not offered as a helper on that layer until their next report says they can (2026-11-21)
+                local a = census[state.zone] and census[state.zone][who]
+                if a and (k == "busy" or k == "off") then a.host = false end
                 state.why = state.why or {}
                 state.why[k] = (state.why[k] or 0) + 1
                 -- moved off that layer: what they told us before is stale, so they stop being offered
@@ -1000,6 +1112,9 @@ function ns.LayerCoreBuild(owner)
             end
             return
         end
+        -- only when someone there can bring you over right now: the popup says so (2026-11-21: Hops to rare layers
+        -- failed with the one Void player there busy)
+        if #C:Hosts(zone, pair) == 0 then return end
         if not canOffer() then return end
         if lastPopup and now() - lastPopup < POPUP_GAP then return end
         lastPopup = now()
@@ -1051,6 +1166,34 @@ function ns.LayerCoreBuild(owner)
     local seenIds = {}   -- [zone][pair] = t
     local function node(zone, pair) return zone .. ":" .. pair end
     local function unnode(k) local z, p = k:match("^(%d+):(%d+%-%d+)$"); return tonumber(z), p end
+    -- a merge renames a layer (Layer.lua v2): its links move to the new name, both directions (Sol review)
+    if Layer.OnMerge then
+        Layer:OnMerge(function(zone, old, new)
+            local ok, nk = node(zone, old), node(zone, new)
+            local from = links[ok]
+            if not from then return end
+            -- one edge from two: the newest own crossing and the newest word of each sender (Sol review 3)
+            local function join(dst, src)
+                if not dst then return src end
+                if src.own and (not dst.own or src.own > dst.own) then dst.own = src.own end
+                dst.by = dst.by or {}
+                for name, t in pairs(src.by or {}) do if not dst.by[name] or t > dst.by[name] then dst.by[name] = t end end
+                return dst
+            end
+            links[nk] = links[nk] or {}
+            for o, e in pairs(from) do
+                if o ~= nk then
+                    links[nk][o] = join(links[nk][o], e)
+                    local back = links[o]
+                    if back then
+                        if back[ok] then back[nk] = join(back[nk], back[ok]) end
+                        back[ok] = nil
+                    end
+                end
+            end
+            links[ok] = nil
+        end)
+    end
 
     local function edgeTime(e)
         -- not 0: GetTime() is seconds since the game started, so a link seen before that is negative
@@ -1313,7 +1456,13 @@ function ns.LayerCoreBuild(owner)
         end
     end
 
-    Layer:OnChange(function(pair, zone)
+    Layer:OnChange(function(pair, zone, how)
+        -- a merge or a restore is a new NAME for the same layer (Layer.lua v2): no crossing, and own links
+        -- stay (Sol review: forgetOwn dropped them on a rename)
+        if how == "merged" or how == "kept" then
+            if trail and trail.zone == zone then trail.pair = pair end
+            return
+        end
         noteSeen(zone, pair)
         if zone and validPair(pair) and not IsInInstance() then forgetOwn(zone, pair) end
         local tr = trail
@@ -1330,9 +1479,11 @@ function ns.LayerCoreBuild(owner)
     end)
     local lf = CreateFrame("Frame")
     for _, ev in ipairs({ "SHARD_TRANSFER_IMMINENT", "SHARD_TRANSFER_CANCELLED", "SHARD_TRANSFER",
-                          "ZONE_CHANGED_NEW_AREA", "GROUP_ROSTER_UPDATE", "PARTY_LEADER_CHANGED", "PLAYER_ENTERING_WORLD" }) do
+                          "ZONE_CHANGED_NEW_AREA", "GROUP_ROSTER_UPDATE", "PARTY_LEADER_CHANGED", "PLAYER_ENTERING_WORLD",
+                          "PLAYER_LOGOUT" }) do
         pcall(lf.RegisterEvent, lf, ev)
     end
+    if Layer.Restore then pcall(Layer.Restore, Layer, S().layerNames) end
     lf:SetScript("OnEvent", function(_, ev)
         if ev == "SHARD_TRANSFER_IMMINENT" then
             readCountdown()
@@ -1350,6 +1501,8 @@ function ns.LayerCoreBuild(owner)
             end
         elseif ev == "ZONE_CHANGED_NEW_AREA" then
             lastZoneT = now()
+        elseif ev == "PLAYER_LOGOUT" then
+            if Layer.Snapshot then S().layerNames = Layer:Snapshot() end
         elseif ev == "PLAYER_ENTERING_WORLD" then
             lastTaintT = now()   -- a login, /reload or loading screen (boat, zeppelin, portal)
         else
@@ -1379,6 +1532,26 @@ function ns.LayerCoreBuild(owner)
     local deaths = {}      -- [guid] = { t, zone, pair, cx, cy }: deaths around you, CAMP_WINDOW
     local alive = {}       -- [guid] = t: seen alive (a corpse never seen alive isn't a new death; Sol review)
     local camps = {}       -- [zone][pair][cell] = { t = cleared, own = true when YOU saw it }
+    if Layer.OnMerge then
+        Layer:OnMerge(function(zone, old, new)
+            -- deaths still counting toward a clear stay on the layer's new name (Sol review)
+            for _, d in pairs(deaths) do if d.zone == zone and d.pair == old then d.pair = new end end
+            local z = camps[zone]
+            if not (z and z[old]) then return end
+            z[new] = z[new] or {}
+            for cell, c in pairs(z[old]) do
+                local n = z[new][cell]
+                if not n then z[new][cell] = c
+                else
+                    -- the newest clear, and YOUR newest clear, each kept on its own (Sol review: ownT was lost)
+                    local ownT = math.max(n.ownT or -math.huge, c.ownT or -math.huge)
+                    if c.t > n.t then z[new][cell] = c; n = c end
+                    if ownT > -math.huge then n.ownT = ownT end
+                end
+            end
+            z[old] = nil
+        end)
+    end
     local campSent = {}    -- [zone:pair:cell] = t
     local lastFreshOffer, pendingOffer
     local function cellKey(cx, cy) return cx .. ":" .. cy end
@@ -1716,9 +1889,21 @@ function ns.LayerCoreBuild(owner)
         local name = fullName(lu)
         local cur, zone = Layer:Here()
         local out = { leader = name, mine = cur }
+        -- the game's own answer, when the leader is in your zone (2026-11-24): nil = same layer, Sharding = another
+        if UnitPhaseReason and C_Map.GetBestMapForUnit(lu) == C_Map.GetBestMapForUnit("player") then
+            local ok, r = pcall(UnitPhaseReason, lu)
+            if ok and not secret(r) and (UnitIsConnected == nil or UnitIsConnected(lu)) then
+                if r == nil then out.pair, out.how, out.differs = cur, "exact", false; return out end
+                local sh = Enum and Enum.PhaseReason and Enum.PhaseReason.Sharding
+                if type(sh) ~= "number" then sh = 1 end
+                if r == sh then out.how, out.differs = "exact", true; return out end
+            end
+        end
         if leaderLayer and leaderLayer.name == name and now() - leaderLayer.t <= ASK_EVERY * 2 and leaderLayer.zone == zone and cur then
             out.pair, out.how = leaderLayer.pair, "exact"
-            out.differs = canon(leaderLayer.pair) ~= canon(cur)
+            local cmp = Layer:Compare(leaderLayer.pair, zone)   -- names differ until proven (Layer.lua v2)
+            if cmp == nil then return out end
+            out.differs = cmp == "other"
             return out
         end
         -- no VoidLayer answer: in your zone and close by, yet the game says you can't see them
@@ -2009,7 +2194,7 @@ function ns.LayerCoreBuild(owner)
     pcall(f.RegisterEvent, f, "CHAT_MSG_WHISPER")
     pcall(f.RegisterEvent, f, "LFG_LIST_ACTIVE_ENTRY_UPDATE")
     pcall(f.RegisterEvent, f, "CHAT_MSG_WHISPER_INFORM")   -- a whisper you sent: remember swap asks
-    f:SetScript("OnEvent", function(_, event, a1, a2, a3, a4)
+    f:SetScript("OnEvent", function(_, event, a1, a2, a3, a4, _, a6)
         if event == "CHAT_MSG_ADDON" then
             if a1 ~= PREFIX or a3 ~= "WHISPER" or type(a2) ~= "string" or secret(a2) or #a2 > 255 then return end
             local who = Net.Canon(a4)
@@ -2106,6 +2291,24 @@ function ns.LayerCoreBuild(owner)
             local _, zone = Layer:Here()
             if zone ~= state.zone or IsInGroup() or InCombatLockdown() or IsInInstance() then
                 C.hlog("cancelled", state, "moved on"); stop("hop cancelled: you've moved on since asking.")
+                return
+            end
+            -- the game says the host is on YOUR layer already (isCrossShard false; 4 of 4 right, 2026-11-24):
+            -- joining moves nothing. Decline, both take one name, and ask the next helper.
+            if a6 == false and not secret(a6) then
+                if DeclineGroup then DeclineGroup() end
+                StaticPopup_Hide("PARTY_INVITE")
+                C.hideLfgPopup()
+                local mine = Layer:Merge(zone, state.hostPair or state.pair)
+                if mine then send(("HN:1:%s:%s"):format(state.nonce, mine), state.host, true) end
+                C.hlog("sameLayer", state)
+                if state.want and Layer:Alias(zone, state.want) == Layer:Current(zone) then
+                    stop("you're on that layer already.")
+                    return
+                end
+                say(("%s is on your layer already; asking another player."):format(state.host))
+                state.phase = "retrying"
+                nextHost()
                 return
             end
             AcceptGroup()

@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.48 — 2026-11-24
+
+- **Layers work again after the game's November 20 update (WoW Forever).** The update gave every NPC a number of its own, so the layer read off the NPCs around you kept jumping. The layer engine every Void addon shares (from VoidLayer 0.6.0) now names your layer itself and lets the game keep the name right: a world refresh or a hop gives you a new name, Void players who turn out to be on one layer take one name, and a layer hop turns down an invite from a helper who's on your layer already.
+
 ## 0.3.47 — 2026-11-21
 
 - **Works next to Questie.** With Questie running, the map "!", minimap objective dots, quest mob icons on nameplates and NPC tooltip quest lines show once (Questie's), the two no longer flip Blizzard's quest tracker on and off, and auto accept / turn-in never clicks the same quest window as Questie's. Turn off Questie's "Available Normal Quests" and VoidQuest draws the "!" again; "Hide Questie" brings all of VoidQuest's marks back.
