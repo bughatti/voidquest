@@ -101,7 +101,7 @@ local function Redraw()
     C_Timer.After(0.5, function()
         redraw = nil
         Invalidate()
-        if VQ.Forever and VQ.Forever.Refresh then VQ.Forever:Refresh() end
+        if VQ.Forever and VQ.Forever.RefreshSoon then VQ.Forever:RefreshSoon() end   -- learned chains: the 1-minute batch
         if VQ.Guide and VQ.Guide.Refresh then VQ.Guide:Refresh() end
     end)
 end

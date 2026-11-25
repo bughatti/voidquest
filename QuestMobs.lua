@@ -275,6 +275,22 @@ local function hideRest()
 end
 
 function M:UpdateMinimap()
+    -- static while nothing moved (perf pass 2026-11-24, the user: "static, update less often"): it re-placed every
+    -- marker 20 times a second standing still. Now only when you move / turn / zoom / rotate, or Refresh() (your
+    -- quest log at once, spots shared by others once a minute). No per-second timer.
+    do
+        local m = C_Map.GetBestMapForUnit("player")
+        local pp = m and C_Map.GetPlayerMapPosition(m, "player")
+        local x, y
+        if pp then x, y = pp:GetXY() end
+        local f = GetPlayerFacing() or 0
+        local r = (C_Minimap and C_Minimap.GetViewRadius and C_Minimap.GetViewRadius()) or 0
+        local rot = GetCVar("rotateMinimap")
+        local L = M._last or {}
+        M._last = L
+        if not cache.dirty and m == L.m and x == L.x and y == L.y and f == L.f and r == L.r and rot == L.rot and Minimap:GetWidth() == L.mw then return end
+        L.m, L.x, L.y, L.f, L.r, L.rot, L.mw = m, x, y, f, r, rot, Minimap:GetWidth()   -- size too: a resized minimap moves every dot (Codex Sol)
+    end
     nActive = 0
     -- Questie puts every objective on the minimap: our dots for the tracked quest would sit on top of its icons
     if not Enabled() or VQ:QuestieDoes("enableMiniMapIcons", "enableObjectives") then hideRest(); return end

@@ -340,6 +340,26 @@ local function bitSet(mask, id)
     if not (mask and id and id > 0) then return true end
     return math.floor(mask / 2 ^ (id - 1)) % 2 == 1
 end
+-- A quest this character could ever take (faction, class, race), for picking which of a quest's
+-- "any one of" earlier quests to point at: Wasteland (1124) takes the Horde "Rabine Saturna" (1123)
+-- or the Alliance one (6762), and the Horde one was named to Alliance players too (the user, 2026-11-24).
+local function forMe(q)
+    local r = VQ.ForeverQuests and VQ.ForeverQuests[q]
+    if not r then return false end
+    local m = Me()
+    local fac = r[3]
+    if fac == "" and VQ.ForeverFaction then fac = VQ.ForeverFaction[q] or "" end
+    if fac == "X" or (fac ~= "" and m.fac ~= "" and fac ~= m.fac) then return false end
+    if not inList(r[7] or "", m.cls) or not inList(r[8] or "", m.race) then return false end
+    local rr = VQ.ForeverRules and VQ.ForeverRules[q]
+    if rr then
+        local _, _, cls = UnitClass("player")
+        local _, _, race = UnitRace("player")
+        if rr.c and not bitSet(rr.c, cls) then return false end
+        if rr.r and not bitSet(rr.r, race) then return false end
+    end
+    return true
+end
 -- F.assumeDone: quests the route planner will have you turn in first (RoutePlan.lua asks "could
 -- I take this once those are done?" for follow-ups; nil the rest of the time)
 local function doneQ(q) return (F.assumeDone and F.assumeDone[q]) or safe(C_QuestLog.IsQuestFlaggedCompleted, q) == true end
@@ -349,14 +369,20 @@ local function titleQ(q)
     if (not t or t == "") and VQ.ForeverQuests and VQ.ForeverQuests[q] then t = VQ.ForeverQuests[q][1] end
     return t and ("\"" .. t .. "\"") or "an earlier quest"
 end
+-- "any one of" earlier quests (rr.py) still to do: the one in your log, else the first one for your
+-- faction / class / race; nil when one of them is done (or there are none)
+local function pickAny(rr)
+    if not (rr and rr.py) then return nil end
+    for _, q in ipairs(rr.py) do if doneQ(q) then return nil end end
+    for _, q in ipairs(rr.py) do if inLogQ(q) then return q end end
+    for _, q in ipairs(rr.py) do if forMe(q) then return q end end
+    return rr.py[1]
+end
 -- the first step still to do back down a chain (1147 -> 1146 -> 1145)
 local function undonePrev(rr)
     if not rr then return nil end
     for _, q in ipairs(rr.pa or {}) do if not doneQ(q) then return q end end
-    if rr.py then
-        for _, q in ipairs(rr.py) do if doneQ(q) then return nil end end
-        return rr.py[1]
-    end
+    return pickAny(rr)
 end
 -- the first quest still to do down a chain of earlier quests (1147 -> 1146 -> 1145)
 local function firstStep(q)
@@ -369,16 +395,76 @@ local function firstStep(q)
     return q
 end
 F.FirstStep = function(_, q) return firstStep(q) end
-local function needsText(q)
-    q = firstStep(q)
-    if inLogQ(q) then return ("Finish and turn in %s first (it's in your log)"):format(titleQ(q)) end
+-- where a quest starts, in words: "from Rabine Saturna in Moonglade" (nil when nothing is known)
+local function fromText(q)
     local s = VQ.Starts and VQ.Starts:Get(q)
-    local zone = s and s.m and C_Map.GetMapInfo(s.m)
+    local zone = s and s.m and safe(C_Map.GetMapInfo, s.m)
     local giver = VQ.Starts and VQ.Starts.Giver and VQ.Starts:Giver(q)
     local where = {}
     if giver then where[#where + 1] = "from " .. giver end
     if zone and zone.name then where[#where + 1] = "in " .. zone.name end
-    return ("Needs %s %sfirst"):format(titleQ(q), #where > 0 and (table.concat(where, " ") .. " ") or "")
+    return #where > 0 and table.concat(where, " ") or nil
+end
+F.FromText = function(_, q) return fromText(q) end
+local function needsText(q)
+    q = firstStep(q)
+    if inLogQ(q) then return ("Finish and turn in %s first (it's in your log)"):format(titleQ(q)) end
+    local from = fromText(q)
+    return ("Needs %s %sfirst"):format(titleQ(q), from and (from .. " ") or "")
+end
+
+-- The earlier quests still to do before this one, first one first, as tooltip lines (nil when none):
+--   1. "The New Frontier" from Bluff Runner Windstrider in Thunder Bluff (or: Warcaller Gorlach in Orgrimmar)
+--   2. "Rabine Saturna" from Arch Druid Hamuul Runetotem in Thunder Bluff
+-- The user, 2026-11-24: Wasteland in the Quest Book told neither what comes before it nor where it starts.
+-- Every quest it needs counts: all of rr.pa (Codex 11-24: following only the first one left the others
+-- out) and one of rr.py; each step's own earlier quests come before it. At most MAX_STEPS lines.
+local MAX_STEPS = 12
+function F:ChainSteps(id)
+    local steps, seen = {}, { [id] = true }
+    local function walk(q, depth)
+        if depth > 10 or #steps >= MAX_STEPS or inLogQ(q) then return end   -- in your log: its own are done
+        local rr = VQ.ForeverRules and VQ.ForeverRules[q]
+        if not rr then return end
+        local need = {}
+        for _, p in ipairs(rr.pa or {}) do if not doneQ(p) then need[#need + 1] = { q = p } end end
+        local any = pickAny(rr)
+        if any then need[#need + 1] = { q = any, py = rr.py } end
+        for _, s in ipairs(need) do
+            if not seen[s.q] and #steps < MAX_STEPS then
+                seen[s.q] = true
+                walk(s.q, depth + 1)
+                -- the same step from other givers ("any one of" alternatives for this character)
+                s.alts = {}
+                for _, o in ipairs(s.py or {}) do
+                    if o ~= s.q and forMe(o) and not doneQ(o) then
+                        local f = fromText(o)
+                        if f then s.alts[#s.alts + 1] = (f:gsub("^from ", "")) end
+                    end
+                end
+                steps[#steps + 1] = s
+            end
+        end
+    end
+    walk(id, 0)
+    if #steps == 0 then return nil end
+    local out = {}
+    for i, s in ipairs(steps) do
+        local tail
+        if inLogQ(s.q) then tail = "(in your log)"
+        else
+            tail = fromText(s.q) or "(start not known yet)"
+            if #s.alts > 0 then tail = tail .. " (or: " .. table.concat(s.alts, ", ") .. ")" end
+        end
+        out[#out + 1] = ("%d. %s %s"):format(i, titleQ(s.q), tail)
+        if i == MAX_STEPS and #steps > MAX_STEPS then
+            out[#out + 1] = ("...and %d more after those"):format(#steps - MAX_STEPS)
+            break
+        end
+    end
+    local ids = {}
+    for i, s in ipairs(steps) do ids[i] = s.q end
+    return out, ids   -- 2nd: EVERY quest ID in order (can be more than the lines shown: the count on the book row)
 end
 local SKILL = { [129] = "First Aid", [164] = "Blacksmithing", [165] = "Leatherworking", [171] = "Alchemy",
     [182] = "Herbalism", [185] = "Cooking", [186] = "Mining", [197] = "Tailoring", [202] = "Engineering",
@@ -456,7 +542,16 @@ function F:Rule(id)
         if past then return "never", "Your reputation is past what it allows" end
     end
     if rr.hol and not holidayToday() then return "later", "A holiday quest: only while its holiday is on" end
-    if rr.ml and lvl < rr.ml then return "later", ("Needs level %d"):format(rr.ml) end
+    -- level AND an earlier quest: say both (the level alone hid Wasteland's earlier quests, 2026-11-24);
+    -- no 3rd value while the level is short, so no grey "go here first" pin for a quest years away
+    if rr.ml and lvl < rr.ml then
+        local why = ("Needs level %d"):format(rr.ml)
+        if undonePrev(rr) then
+            local n = needsText(id):gsub("^Needs ", "", 1):gsub("^Finish", "finish", 1)
+            why = why .. ", and " .. n
+        end
+        return "later", why
+    end
     if undonePrev(rr) then return "later", needsText(id), firstStep(id) end   -- 3rd: where to go first
     if rr.sk then
         local have = mySkill(rr.sk[1])
@@ -862,6 +957,13 @@ local function Tooltip(owner, id, anchor)
     if st == "open" then
         local ok, why = F:Available(id)
         if not ok then GameTooltip:AddLine(why, 1, 0.5, 0.3, true) end
+        -- every earlier quest still to do, with where each starts: the reason names only the first one,
+        -- so the list shows when there are more, or when the step has other givers too
+        local steps = not ok and F:ChainSteps(id)
+        if steps and (#steps > 1 or steps[1]:find("(or: ", 1, true)) then
+            GameTooltip:AddLine("Do these first:", 1, 0.82, 0)
+            for _, s in ipairs(steps) do GameTooltip:AddLine("  " .. s, 1, 1, 1, true) end
+        end
         local seen = VoidQuestDB and VoidQuestDB.offerLevel and VoidQuestDB.offerLevel[id]
         local sd = VQ.ForeverSeed and VQ.ForeverSeed[id]
         if sd and sd.lv and (not seen or sd.lv < seen) then seen = sd.lv end
@@ -887,8 +989,9 @@ local function Tooltip(owner, id, anchor)
     if VQ.Companions then
         if st == "log" then VQ.Companions:AddTooltip(GameTooltip, id) else VQ.Companions:AddPinLine(GameTooltip, id) end
     end
-    local giver = VQ.Starts and VQ.Starts:Giver(id)
-    if giver then GameTooltip:AddLine("Given by " .. giver, 0.6, 1, 0.6) end
+    -- where it starts: the giver and the zone (the name alone didn't say where, 2026-11-24)
+    local from = fromText(id)
+    if from then GameTooltip:AddLine("Starts " .. from, 0.6, 1, 0.6, true) end
     local esc = st == "open" and F:EscortNote(id)
     if esc then GameTooltip:AddLine(esc, 1, 0.82, 0, true) end
     GameTooltip:AddLine(" ")
@@ -1091,22 +1194,44 @@ function VoidQuestForeverProviderMixin:RemoveAllData()
     if self:GetMap() then self:GetMap():RemoveAllPinsByTemplate(PIN_TEMPLATE) end
 end
 
+-- Static pins (perf pass 2026-11-24, measured on the user's PC: 36 ms a redraw, up to 134, on every map open / zoom /
+-- switch; the user: "static, update less often"). The pins of a map are worked out once and kept; F:Refresh (a quest
+-- taken / turned in / loaded, a level, new starts learned) throws them away. Working them out asks the game about
+-- each map once, not once per quest (it was ~4,500 GetMapInfo calls a redraw).
+F.pinCache = {}
 function VoidQuestForeverProviderMixin:RefreshAllData()
     self:RemoveAllData()
     if InCombatLockdown() or VQ:Get("foreverPins") == false then return end
     local map = self:GetMap()
     local mapID = map and map:GetMapID()
     if not mapID then return end
-    -- starts are saved on the zone map you stood on; this map or its child zones
-    local function onThis(m)
-        if m == mapID then return true end
-        local mi = safe(C_Map.GetMapInfo, m)
-        return mi and mi.parentMapID == mapID and mi.mapType ~= ZONE_MAP and true or false
-    end
-    local waiting = false
     -- Questie draws the plain "!" itself: then only ours that it doesn't have (the orange "goes with a quest in
     -- your log" bang, bigger, on top of its "!", and the grey "do an earlier quest first")
     local questieBangs = VQ:QuestieDoes("enableMapIcons", "enableAvailable", "showAvailableQuests")
+    local key = ("%d:%s:%s:%d"):format(mapID, tostring(questieBangs), tostring(VQ:Get("foreverPinsLater") ~= false), UnitLevel("player") or 0)
+    local pins = F.pinCache[key]
+    if not pins then
+        pins = self:WorkOutPins(mapID, questieBangs)
+        F.pinCache[key] = pins
+    end
+    for _, p in ipairs(pins) do map:AcquirePin(PIN_TEMPLATE, p[1], p[2], p[3], p[4]) end
+end
+
+function VoidQuestForeverProviderMixin:WorkOutPins(mapID, questieBangs)
+    local out = {}
+    -- starts are saved on the zone map you stood on; this map or its child zones (asked once per map)
+    local onMemo = {}
+    local function onThis(m)
+        if m == mapID then return true end
+        local v = onMemo[m]
+        if v == nil then
+            local mi = safe(C_Map.GetMapInfo, m)
+            v = mi and mi.parentMapID == mapID and mi.mapType ~= ZONE_MAP and true or false
+            onMemo[m] = v
+        end
+        return v
+    end
+    local waiting = false
     for id, r in pairs(VQ.ForeverQuests or {}) do
         local s = F:Spot(id)
         -- Min / Mid / Max, or a quest that goes with one in your log (Companions.lua: shown whatever the tier)
@@ -1129,14 +1254,15 @@ function VoidQuestForeverProviderMixin:RefreshAllData()
                 if cont and wp then p = select(2, safe(C_Map.GetMapPosFromWorldPos, cont, wp, mapID)) end
                 if p then x, y = p:GetXY() else x = nil end
             end
-            if x then map:AcquirePin(PIN_TEMPLATE, id, x, y, (not ok) and first or nil) end
+            if x then out[#out + 1] = { id, x, y, (not ok) and first or nil } end
         end
     end
     -- levels still loading: draw again once LEVEL_WAIT is up (answers also redraw as they come in)
     if waiting and not self.levelTimer then
         self.levelTimer = true
-        C_Timer.After(LEVEL_WAIT + 1, function() self.levelTimer = nil; F:Refresh() end)
+        C_Timer.After(LEVEL_WAIT + 1, function() self.levelTimer = nil; F:RefreshSoon() end)
     end
+    return out
 end
 
 ----------------------------------------------------------------------
@@ -1152,6 +1278,7 @@ end
 -- together for levels). Also called by QuestStarts when it learns new starts.
 local pending
 function F:Refresh()
+    F.pinCache = {}   -- something changed: the map's pins are worked out again on its next draw
     if pending or not self:Active() then return end
     pending = true
     C_Timer.After(0.3, function()
@@ -1159,6 +1286,15 @@ function F:Refresh()
         F:Render()
         if F.provider and WorldMapFrame:IsShown() then F.provider:RefreshAllData() end
     end)
+end
+
+-- Background data (quest levels from the server, starts / chains / spots shared by other players) waits for one
+-- redraw a minute (the user, 2026-11-24: "static pins, and update every 1 min, just the changes"). What you just
+-- did (took, turned in or dropped a quest, a level, a zone, a setting) still redraws at once: F:Refresh.
+local soon
+function F:RefreshSoon()
+    if soon then return end
+    soon = C_Timer.NewTimer(60, function() soon = nil; F:Refresh() end)
 end
 
 ev:SetScript("OnEvent", function(_, e, arg)
@@ -1171,6 +1307,7 @@ ev:SetScript("OnEvent", function(_, e, arg)
         end
         return
     end
+    if e == "QUEST_DATA_LOAD_RESULT" then F:RefreshSoon() return end   -- levels arrive in bursts: once a minute
     F:Refresh()
 end)
 

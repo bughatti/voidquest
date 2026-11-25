@@ -169,8 +169,9 @@ local function QuestLines(tt, q)
     if F and F.Rule then state, why = F:Rule(q) end
     if state == "later" and why then
         local mine = UnitLevel and UnitLevel("player")
-        local extra = (why:find("^Needs level") and mine) and (" (you're " .. mine .. ")") or ""
-        tt:AddLine("    " .. why .. extra, 1, 0.6, 0.2)
+        -- "(you're N)" right after the level: the reason can go on with an earlier quest
+        if mine then why = why:gsub("^(Needs level %d+)", "%1 (you're " .. mine .. ")", 1) end
+        tt:AddLine("    " .. why, 1, 0.6, 0.2, true)
     elseif state ~= "never" then
         tt:AddLine("    You can take it now", 0.24, 0.86, 0.52)
     end

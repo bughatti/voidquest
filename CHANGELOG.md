@@ -1,5 +1,13 @@
 # VoidQuest Changelog
 
+## 0.3.49 — 2026-11-25
+
+- **Much lighter on your computer.** VoidQuest was the heaviest Void addon: its guide panel redrew itself several times a second, on every loot. It now redraws only when your quest log really changes, and not at all on a flight path (once when you land). In our measurements it went from 1.57 to 0.28 ms a frame, and stutters dropped from 159 to 9 per 1000 frames.
+- **Map and minimap "!" pins stay put** and only move when you do; quest data shared by other players is added once a minute instead of all the time.
+- **Route without the freeze.** Opening Route used to lock the game for a second or two while it planned. It now plans a little at a time, and keeps the plan: turning in, abandoning, picking up or finishing a quest changes the route in place. "Plan again" starts over.
+- **WoW Forever: the other faction's quests are gone.** Quests only the other side can take no longer show in the guide, the Quest Book, the zone list or on the map.
+- **Quest Book:** a quest you haven't taken yet says how many quests come before it and where it starts, right on its row.
+
 ## 0.3.48 — 2026-11-24
 
 - **Layers work again after the game's November 20 update (WoW Forever).** The update gave every NPC a number of its own, so the layer read off the NPCs around you kept jumping. The layer engine every Void addon shares (from VoidLayer 0.6.0) now names your layer itself and lets the game keep the name right: a world refresh or a hop gives you a new name, Void players who turn out to be on one layer take one name, and a layer hop turns down an invite from a helper who's on your layer already.

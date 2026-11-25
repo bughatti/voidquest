@@ -78,6 +78,7 @@ function mod:Apply(key)
         VQ.Minimap:SetShown(VQ:Get("minimapShow"))
     end
     if key == "share" and VQ.Share then VQ.Share:Apply() end
+    if VQ.Forever then VQ.Forever.pinCache = {} end   -- any setting: the map's "!" pins are worked out again
     -- WoW Forever's Min / Mid / Max: the map's "!" and the zone list follow it
     if key == "foreverDensity" and VQ.Forever and VQ.Forever.Refresh then VQ.Forever:Refresh() end
     if VQ.Givers then VQ.Givers:Refresh() end   -- density / giverPins change what's highlighted

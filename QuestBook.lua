@@ -736,6 +736,19 @@ local function FillRow(row, e)
     -- a VoidDB fill doesn't tell (ForeverZone F:RewardSplit)
     local pick = VQ.Forever and VQ.Forever.RewardPickOne and VQ.Forever:RewardPickOne(e.id)
     if pick then bits[#bits + 1] = "pick one reward" end
+    -- not taken yet: the quests before it and where it starts, right on the row (the user, 2026-11-24:
+    -- Wasteland showed neither; the full chain is in the tooltip)
+    if st == "can" or st == "later" then
+        local F = FZ()
+        local steps, ids
+        if st == "later" and F.ChainSteps then steps, ids = F:ChainSteps(e.id) end
+        local n = ids and #ids or 0
+        if n > 0 then bits[#bits + 1] = ("|cffff8040%d quest%s first|r"):format(n, n > 1 and "s" or "") end
+        local from = F.FromText and F:FromText(e.id)
+        local tail = " in " .. (e.zone or "")
+        if from and from:sub(-#tail) == tail then from = from:sub(1, -#tail - 1) end   -- the zone is already there
+        if from and from ~= "" and from ~= tail:sub(2) then bits[#bits + 1] = from end
+    end
     row.sub:SetText(table.concat(bits, "  ·  "))
     -- reward icons, bags first: a "pick one" quest can have 7+ rewards and the bag was cut off
     -- and when searching, the rewards that match come first ("off hand": the dagger, not the boots)
@@ -1128,6 +1141,27 @@ function B:CheckStale()
         for _, x in ipairs(all) do x.status = nil end
     end
 end
+
+----------------------------------------------------------------------
+-- Read-only hooks for the all-in-one VoidHub window (2026-11-24). The hub draws its own Quest Book
+-- page from exactly these functions, so both show the same quests. Nothing here changes the book:
+-- List() runs the book's own Current() with the hub's category / search and puts the book's back.
+----------------------------------------------------------------------
+B.Hub = {
+    All = function() Build(); return all, byId, zoneCont end,
+    Categories = function() return Categories() end,
+    List = function(cat, query, usable)
+        local k1, k2, k3 = B.cat, B.query, B.usable
+        B.cat, B.query, B.usable = cat or "summary", query, usable
+        local ok, list, title, isSummary, vendorBags, dl = pcall(Current)
+        B.cat, B.query, B.usable = k1, k2, k3
+        if not ok then error(list, 2) end
+        return list, title, isSummary, vendorBags, dl
+    end,
+    Counts = Counts, Classify = Classify, SortList = SortList, DropStatus = DropStatus, SortDrops = SortDrops,
+    Terms = Terms, BagKind = BAG_KIND, ItemLinkOf = ItemLinkOf,
+    KALIMDOR = KALIMDOR, EASTERN = EASTERN,
+}
 
 BINDING_HEADER_VOIDQUEST = BINDING_HEADER_VOIDQUEST or "VoidQuest"
 BINDING_NAME_VOIDQUEST_BOOK = "Open the Quest Book"

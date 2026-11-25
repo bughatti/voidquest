@@ -292,7 +292,32 @@ local function worldPos(s)
     if ok and cont and wp then return cont, wp.x, wp.y end
 end
 local links
+-- Planning without freezing the game (perf pass 2026-11-24, measured on the user's PC: one plan took 1.7 s in one
+-- frame, "it froze the game for a sec or 2"; 2/3 of it was 20,000 travel-time lookups). Two things:
+--   * P:BuildAsync runs P:Build in a coroutine, BUDGET ms of it per frame; step() is where it may pause.
+--   * travel times are kept between plans (two spots always take as long); TAXIMAP_CLOSED (new flight paths)
+--     forgets them. At most TRAVEL_KEEP pairs, then it starts over.
+local BUDGET, TRAVEL_KEEP = 6, 30000
+local sliceStart, inCo = 0, false
+local function step()
+    if inCo and debugprofilestop() - sliceStart > BUDGET then coroutine.yield() end
+end
+local travelKeep, travelN = {}, 0
+local function spotKey(p)
+    return ("%d:%d:%d%s"):format(p.map or 0, math.floor((p.x or 0) * 2000), math.floor((p.y or 0) * 2000), p.here and "h" or "")
+end
+local travelRaw
 local function travel(a, b)
+    local k = spotKey(a) .. "|" .. spotKey(b)
+    local v = travelKeep[k]
+    if v then return v end
+    step()
+    v = travelRaw(a, b)
+    if travelN >= TRAVEL_KEEP then wipe(travelKeep); travelN = 0 end
+    travelKeep[k], travelN = v, travelN + 1
+    return v
+end
+travelRaw = function(a, b)
     if a.map == b.map and math.abs(a.x - b.x) < SAME_SPOT and math.abs(a.y - b.y) < SAME_SPOT then return 0 end
     if VoidGPS and VoidGPS.TravelTime then
         local from = nil   -- nil = where you stand (the start)
@@ -439,6 +464,7 @@ function P:Build()
         local found = {}
         local function leftOut(r, why) skipped.here[#skipped.here + 1] = ("%s (%s)"):format(r[1], why) end
         for qid, r in pairs(VQ.ForeverQuests) do
+            step()
             if not inLog[qid] then
                 local sp = safe(F.Spot, F, qid)
                 local z = sp and sp.m and sp.x and zoneOf(sp.m)
@@ -466,6 +492,7 @@ function P:Build()
         end)
         for _, c in ipairs(found) do
             if #candQ >= PICK_TRY then break end
+            step()
             local objs = objectiveSpots(c.qid)
             local tin, who, guessed = turninSpot(c.qid)
             if not (#objs > 0 and tin) then
@@ -565,6 +592,7 @@ function P:Build()
         local bp, bt, bc
         for p = from, L do
             local da = added(p, a)
+            step()
             for t = p, L do
                 local c
                 if t == p then
@@ -586,6 +614,7 @@ function P:Build()
             local before = cost(r)
             local best, bestC
             for p = posPrev, #r do
+                step()
                 local t2 = {}
                 for k = 1, #r do t2[k] = r[k] end
                 table.insert(t2, p + 1, seq[i])
@@ -634,15 +663,17 @@ function P:Build()
                         if sp and tin and not (#objs == 0 and needs and #needs > 0) then
                             local m = VQ.QuestTime and VQ.QuestTime:Minutes(y)
                             local q = { qid = y, title = r[1], lvl = (F.Level and safe(F.Level, F, y)) or 0, seq = {},
-                                xp = tonumber(r[4]) or 0, pick = true, follow = true, after = x.seq[#x.seq] }
+                                xp = tonumber(r[4]) or 0, pick = true, follow = true, after = x.seq[#x.seq], from = x.qid }
                             q.minXP = minXPFor(q.lvl)
                             -- needs ALL of several earlier quests (rules pa): after every one the plan turns in
                             -- (Codex 11-12: only the one it was found from was waited for)
                             local rr = VQ.ForeverRules and VQ.ForeverRules[y]
                             q.afterAll = {}
+                            q.needs = { [x.qid] = true }   -- every quest it waits for: drop it if any is abandoned
                             for _, a in ipairs(rr and rr.pa or {}) do
                                 local pq = planned[a]
                                 if pq and pq.seq[#pq.seq] then q.afterAll[#q.afterAll + 1] = pq.seq[#pq.seq] end
+                                if pq then q.needs[a] = true end
                             end
                             addStop(q, { kind = "pickup", who = VQ.Starts and VQ.Starts:Giver(y), map = sp.m, x = sp.x, y = sp.y, work = TURNIN_SEC })
                             local w = (m and m * 60 or (PICK_WORK * guessPer(y) / 30)) * levelFactor(q.lvl) / math.max(1, #objs)
@@ -677,6 +708,7 @@ function P:Build()
     local baseRate = (#route > 0 and xp > 0) and xp / (cost(route) + baseWork) or 0
     local tries = {}
     for _, q in ipairs(candQ) do
+        step()
         local _, add = insertQuest(route, q)
         local extra = add + workOf(q)
         tries[#tries + 1] = { q = q, rate = q.xp / math.max(60, extra) }
@@ -735,6 +767,7 @@ function P:Build()
         local improved = false
         for i = 1, #route do
             for j = 1, #route do
+                step()
                 if i ~= j then
                     local r = {}
                     for k = 1, #route do if k ~= i then r[#r + 1] = route[k] end end
@@ -761,6 +794,40 @@ function P:Build()
     return { steps = steps, sec = tr + work, travel = tr, work = work, xp = xp, quests = quests, picks = picks, follows = follows, explores = explores,
         skipped = skipped, at = time() }
 end
+
+local rawBuild = P.Build   -- kept at load, before anything can wrap it
+-- P:BuildAsync(cb): the plan, a few ms a frame; cb(plan, why) when it's done. A second ask while one runs waits for
+-- that one (every waiting cb gets it). P.lastPlan = the newest finished plan.
+local runner, co, waiting = nil, nil, {}
+-- quest events that came while a plan was being built: applied to it once it's done, so a quest turned in or dropped
+-- mid-build doesn't stay on the route (Codex Sol 11-25). One entry per event + quest.
+local pendingEv, pendingSeen = {}, {}
+function P:BuildAsync(cb)
+    if cb then waiting[#waiting + 1] = cb end
+    if co then return end
+    -- the build as this file made it: anything wrapped around P.Build later (a pcall: a profiler, a hook) would
+    -- stop the coroutine from pausing ("attempt to yield across metamethod/C-call boundary", seen 2026-11-25)
+    co = coroutine.create(function() return rawBuild(P) end)
+    runner = runner or CreateFrame("Frame")
+    runner:SetScript("OnUpdate", function()
+        sliceStart, inCo = debugprofilestop(), true
+        local ok, plan, why = coroutine.resume(co)
+        inCo = false
+        if coroutine.status(co) ~= "dead" then return end   -- more next frame
+        runner:SetScript("OnUpdate", nil)
+        co = nil
+        if not ok then plan, why = nil, tostring(plan) end
+        if plan then
+            P.lastPlan = plan
+            for _, p in ipairs(pendingEv) do pcall(P.Apply, P, p[1], p[2]) end
+        end
+        wipe(pendingEv); wipe(pendingSeen)
+        local list = waiting
+        waiting = {}
+        for _, f in ipairs(list) do pcall(f, plan, why) end
+    end)
+end
+function P:Planning() return co ~= nil end
 
 ----------------------------------------------------------------------
 -- The window
@@ -826,10 +893,18 @@ local function row(i)
     return r
 end
 
-local function render()
+local draw
+-- force = "Plan again": from scratch. Otherwise the kept plan (changed by P:Apply as you play) is shown as it is.
+local function render(force)
     if not (W and W:IsShown()) then return end
+    if P.lastPlan and force ~= true then W.planning:Hide(); draw(P.lastPlan) return end
+    -- the last plan stays up while the new one is worked out (a few frames, no freeze)
+    if not P.lastPlan then W.summary:SetText("|cffffd200Planning your route...|r"); W.foot:SetText("") end
+    W.planning:Show()
+    P:BuildAsync(function(plan, why) if W:IsShown() then W.planning:Hide(); draw(plan, why) end end)
+end
+draw = function(plan, why)
     for _, r in ipairs(rows) do r:Hide(); r.st = nil end
-    local plan, why = P:Build()
     if not plan then W.summary:SetText("|cffff8040" .. (why or "No plan") .. "|r"); W.foot:SetText(""); return end
     if #plan.steps == 0 then
         W.summary:SetText("Nothing to plan: no quests you can do solo with a known place.")
@@ -898,7 +973,9 @@ local function build()
     W.summary:SetPoint("TOPLEFT", 10, -28); W.summary:SetPoint("RIGHT", -10, 0); W.summary:SetJustifyH("LEFT")
     local refresh = CreateFrame("Button", nil, W, "UIPanelButtonTemplate")
     refresh:SetSize(70, 18); refresh:SetPoint("BOTTOMRIGHT", -8, 8); refresh:SetText("Plan again")
-    refresh:SetScript("OnClick", render)
+    refresh:SetScript("OnClick", function() render(true) end)   -- from scratch
+    W.planning = W:CreateFontString(nil, "OVERLAY"); VQ:SetFont(W.planning, 10)
+    W.planning:SetPoint("RIGHT", refresh, "LEFT", -8, 0); W.planning:SetText("|cffffd200planning...|r"); W.planning:Hide()
     W.foot = W:CreateFontString(nil, "OVERLAY"); VQ:SetFont(W.foot, 10)
     W.foot:SetPoint("BOTTOMLEFT", 10, 30); W.foot:SetPoint("RIGHT", -10, 0); W.foot:SetJustifyH("LEFT"); W.foot:SetJustifyV("BOTTOM")
     W.foot:SetMaxLines(6)
@@ -932,19 +1009,138 @@ end
 -- plan again when the log changes while the window is open: right away when a quest is taken,
 -- turned in or dropped; for progress (every kill) at most every PROGRESS_GAP, since planning a
 -- full log takes a moment
-local PROGRESS_GAP = 30
-local queued, lastProgress = false, 0
+----------------------------------------------------------------------
+-- The plan is kept and CHANGED, not planned again (the user, 2026-11-24: "static should be static and changes get
+-- refreshed"). A quest turned in or dropped: its stops go. An objective done: its "do" stops go. A quest the plan
+-- had as a pick-up: that stop goes. A new quest: its stops go in where they cost least. New flight paths: the
+-- times between stops are worked out again, the order kept. "Plan again" (or a first open) plans from scratch.
+----------------------------------------------------------------------
+local function startSpot()
+    local m = safe(C_Map.GetBestMapForUnit, "player")
+    local p = m and safe(C_Map.GetPlayerMapPosition, m, "player")
+    local x, y
+    if p and p.GetXY then x, y = p:GetXY() end
+    if not (m and x) or secret(x) then return nil end
+    return { map = m, x = x, y = y, here = true }
+end
+-- the times and totals of a plan after its steps changed (travel times mostly come from travelKeep)
+local function retime(plan)
+    local prev = startSpot()
+    local tr, work, xp = 0, 0, 0
+    local qs, picks, follows, explores, seen = 0, 0, 0, 0, {}
+    for _, st in ipairs(plan.steps) do
+        st.travel = prev and travel(prev, st) or (st.travel or 0)
+        tr, work, prev = tr + st.travel, work + (st.work or 0), st
+        local q = st.q
+        if st.kind == "turnin" then xp = xp + (q.xp or 0) end
+        if not seen[q] then
+            seen[q] = true
+            if q.explore then explores = explores + 1
+            elseif q.follow then follows = follows + 1
+            elseif q.pick then picks = picks + 1
+            else qs = qs + 1 end
+        end
+    end
+    plan.travel, plan.work, plan.sec, plan.xp = tr, work, tr + work, xp
+    plan.quests, plan.picks, plan.follows, plan.explores = qs, picks, follows, explores
+end
+local function dropSteps(plan, keep)
+    local out = {}
+    for _, st in ipairs(plan.steps) do if keep(st) then out[#out + 1] = st end end
+    local changed = #out ~= #plan.steps
+    plan.steps = out
+    return changed
+end
+-- a quest the plan doesn't have: each of its stops where it adds the least travel, after the one before it
+local function insertNew(plan, qid)
+    local r = VQ.ForeverQuests and VQ.ForeverQuests[qid]
+    if not r or (r[6] or ""):find("[DREP]") then return false end
+    local tin, who, guessed = turninSpot(qid)
+    local done = safe(C_QuestLog.IsComplete, qid)
+    local objs = not done and objectiveSpots(qid) or {}
+    if not tin or (not done and #objs == 0) then return false end
+    local q = { qid = qid, title = r[1], lvl = questLevel(qid), seq = {}, xp = tonumber(r[4]) or 0 }
+    local w = workLeft(qid) / math.max(1, #objs)
+    local new = {}
+    for _, o in ipairs(objs) do new[#new + 1] = { q = q, kind = "do", map = o.map, x = o.x, y = o.y, what = (#objs > 1 or o.always) and o.what or nil, work = w } end
+    new[#new + 1] = { q = q, kind = "turnin", who = who, map = tin.map, x = tin.x, y = tin.y, work = TURNIN_SEC, guessed = guessed }
+    local here = startSpot()
+    local steps, from = plan.steps, 0
+    for _, st in ipairs(new) do
+        local bestP, bestC
+        for p = from, #steps do
+            local a = p == 0 and here or steps[p]
+            local b = steps[p + 1]
+            local c = (a and travel(a, st) or 0) + (b and (travel(st, b) - (a and travel(a, b) or 0)) or 0)
+            if not bestC or c < bestC then bestP, bestC = p, c end
+        end
+        table.insert(steps, bestP + 1, st)
+        from = bestP + 1
+    end
+    return true
+end
+-- one event -> the change to the kept plan; true = the plan changed (redraw)
+function P:Apply(e, qid)
+    local plan = P.lastPlan
+    if not plan then return false end
+    if e == "TAXIMAP_CLOSED" then retime(plan) return true end
+    if (e == "QUEST_TURNED_IN" or e == "QUEST_REMOVED") and qid then
+        -- abandoned (gone from the log, not done): the follow-ups planned after it can't open now, nor theirs
+        -- (Codex Sol 11-25). A turn-in also fires QUEST_REMOVED, but then the quest is done and its follow-ups stay.
+        local gone = { [qid] = true }
+        if e == "QUEST_REMOVED" and not safe(C_QuestLog.IsQuestFlaggedCompleted, qid) then
+            local more = true
+            while more do
+                more = false
+                for _, st in ipairs(plan.steps) do
+                    local q = st.q
+                    if q.follow and not gone[q.qid] then
+                        for need in pairs(q.needs or { [q.from or 0] = true }) do
+                            if gone[need] then gone[q.qid] = true; more = true; break end
+                        end
+                    end
+                end
+            end
+        end
+        if dropSteps(plan, function(st) return not gone[st.q.qid] end) then retime(plan) return true end
+        return false
+    end
+    if e == "QUEST_ACCEPTED" and qid then
+        -- the plan's own pick-up: that stop is done
+        if dropSteps(plan, function(st) return not (st.kind == "pickup" and st.q.qid == qid) end) then retime(plan) return true end
+        -- already planned (a follow-up taken early), else fit it in
+        for _, st in ipairs(plan.steps) do if st.q.qid == qid then return false end end
+        if insertNew(plan, qid) then retime(plan) return true end
+        return false
+    end
+    if e == "QUEST_LOG_UPDATE" then
+        -- objectives done: their "do" stops go (progress alone changes nothing on the route)
+        local doneNow = {}
+        for _, st in ipairs(plan.steps) do
+            local id = st.q.qid
+            if st.kind == "do" and id and doneNow[id] == nil then doneNow[id] = safe(C_QuestLog.IsComplete, id) and true or false end
+        end
+        if dropSteps(plan, function(st) return not (st.kind == "do" and doneNow[st.q.qid]) end) then retime(plan) return true end
+    end
+    return false
+end
+
 local ev = CreateFrame("Frame")
 -- TAXIMAP_CLOSED: VoidGPS just learned this character's flight paths from that map, and the plan's
 -- flights should follow (the user, 2026-11-11: "i opened the flight map over here, if it was
 -- collected, it should have already")
 for _, e in ipairs({ "QUEST_ACCEPTED", "QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_LOG_UPDATE", "TAXIMAP_CLOSED" }) do ev:RegisterEvent(e) end
-ev:SetScript("OnEvent", function(_, e)
-    if not (W and W:IsShown()) or queued then return end
-    if e == "QUEST_LOG_UPDATE" then
-        if GetTime() - lastProgress < PROGRESS_GAP then return end
-        lastProgress = GetTime()
+ev:SetScript("OnEvent", function(_, e, qid)
+    if e == "TAXIMAP_CLOSED" then wipe(travelKeep); travelN = 0 end   -- new flight paths: the ways change
+    if type(qid) ~= "number" then qid = nil end
+    if co then   -- a plan is being built: keep it for when it's done, in order (accept / abandon / accept again)
+        if e == "QUEST_LOG_UPDATE" or e == "TAXIMAP_CLOSED" then   -- these carry no quest: once is enough
+            if not pendingSeen[e] then pendingSeen[e] = true; pendingEv[#pendingEv + 1] = { e } end
+        else   -- a build takes a second or two: a handful at most, never dropped (Codex Sol)
+            pendingEv[#pendingEv + 1] = { e, qid }
+        end
+        return
     end
-    queued = true
-    C_Timer.After(1.5, function() queued = false; pcall(render) end)
+    local ok, changed = pcall(P.Apply, P, e, qid)
+    if ok and changed and W and W:IsShown() and P.lastPlan then pcall(draw, P.lastPlan) end
 end)

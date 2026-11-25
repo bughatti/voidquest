@@ -5174,8 +5174,11 @@ end
 -- Debounced live refresh (QUEST_LOG_UPDATE fires a lot).
 do
     local ev = CreateFrame("Frame")
-    local pending
+    local pending, onTaxi
     local function queue()
+        -- on a flight path nothing on the ground changes for you: one redraw when you land (perf pass: every subzone
+        -- flown over redrew the panel at ~12 ms)
+        if UnitOnTaxi and UnitOnTaxi("player") then onTaxi = true return end
         if pending then return end
         pending = true
         C_Timer.After(0.4, function()
@@ -5208,14 +5211,79 @@ do
                          "TRACKED_RECIPE_UPDATE",   -- profession recipe tracked/untracked
                          "BAG_UPDATE_DELAYED",      -- reagent counts for recipe checklists
                          "CURRENCY_DISPLAY_UPDATE", -- coffer keys / shards line
-                         "ZONE_CHANGED" }) do       -- new subzone: re-pick the side quest on the way
+                         "ZONE_CHANGED",            -- new subzone: re-pick the side quest on the way
+                         "PLAYER_CONTROL_GAINED" }) do   -- landed from a flight path: the one redraw it waited for
         ev:RegisterEvent(e)
+    end
+    local qdlr   -- quest data answers: gathered, one redraw at most every 5 s
+    local qlu    -- quest line updates (retail): the same
+    -- Noisy events (perf pass 2026-11-24, measured on the user's PC: the panel redrew ~3x a second at 11.5 ms each
+    -- while grinding Blood Amber, every loot and every QUEST_LOG_UPDATE; that was 2/3 of all addon CPU and a
+    -- skipped frame each time). These only redraw when the quest log really changed: quest ids, done or not, and
+    -- each objective's count. A tracked recipe (retail checklists) still follows the bags.
+    local NOISY = { QUEST_LOG_UPDATE = true, QUEST_WATCH_UPDATE = true, QUEST_POI_UPDATE = true,
+                    UNIT_QUEST_LOG_CHANGED = true, BAG_UPDATE_DELAYED = true }
+    local lastSig
+    local function logSig()
+        local parts = {}
+        for i = 1, (C_QuestLog.GetNumQuestLogEntries() or 0) do
+            local info = C_QuestLog.GetInfo(i)
+            local q = info and not info.isHeader and info.questID
+            if q then
+                parts[#parts + 1] = q .. (C_QuestLog.IsComplete(q) and "c" or "")
+                local objs = C_QuestLog.GetQuestObjectives(q)
+                if objs then
+                    for _, o in ipairs(objs) do parts[#parts + 1] = (o.numFulfilled or 0) .. (o.finished and "f" or "") end
+                end
+            end
+        end
+        return table.concat(parts, ",")
+    end
+    local function recipeTracked()
+        local T = C_TradeSkillUI
+        if not (T and T.GetRecipesTracked) then return false end
+        local ok, a = pcall(T.GetRecipesTracked, false)
+        local ok2, b = pcall(T.GetRecipesTracked, true)
+        return (ok and type(a) == "table" and #a > 0) or (ok2 and type(b) == "table" and #b > 0)
     end
     ev:SetScript("OnEvent", function(_, event, arg1)
         -- widgets update all the time everywhere; only a scenario's header (delve lives) matters
         if event == "UPDATE_UI_WIDGET" and not (C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario()) then
             return
         end
+        if NOISY[event] then
+            if event == "UNIT_QUEST_LOG_CHANGED" and arg1 ~= "player" then queue() return end   -- a party member's: group counts
+            if event == "BAG_UPDATE_DELAYED" and recipeTracked() then queue() return end
+            local sig = logSig()
+            if sig == lastSig then return end
+            lastSig = sig
+            queue()
+            return
+        end
+        -- quest lines: none on WoW Forever (GetAvailableQuestLines gives nothing for Classic quests), yet the event fired
+        -- ~1,000 times a session there (counted 2026-11-25): ignored on Forever; on retail one redraw per 5 s at most
+        if event == "QUESTLINE_UPDATE" then
+            if VQ.ForeverQuests then return end
+            if not qlu then qlu = C_Timer.NewTimer(5, function() qlu = nil; queue() end) end
+            return
+        end
+        if event == "PLAYER_CONTROL_GAINED" then
+            if onTaxi and not (UnitOnTaxi and UnitOnTaxi("player")) then onTaxi = nil; queue() end
+            return
+        end
+        -- quest data arrives in long bursts (levels, XP, titles VoidQuest asked the server for): one redraw at most
+        -- every 5 s for all of them (perf pass 2026-11-24)
+        if event == "QUEST_DATA_LOAD_RESULT" then
+            if not qdlr then
+                qdlr = C_Timer.NewTimer(5, function()
+                    qdlr = nil
+                    if VQ.Guide then VQ.Guide:InvalidateXP() end
+                    queue()
+                end)
+            end
+            return
+        end
+        lastSig = logSig()   -- anything else redraws; the next noisy one compares with the log as of now
         if event == "QUEST_REMOVED" and VQ.Guide then
             -- Abandoned/removed a quest: if it was the one we're pinning, clear immediately
             -- (don't wait for the debounce) so the stale pin doesn't hang around.

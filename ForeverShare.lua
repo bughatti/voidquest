@@ -658,7 +658,7 @@ local function scheduleRefresh()
     refreshPending = true
     C_Timer.After(2, function()
         refreshPending = nil
-        if VQ.Forever and VQ.Forever.Refresh then VQ.Forever:Refresh() end
+        if VQ.Forever and VQ.Forever.RefreshSoon then VQ.Forever:RefreshSoon() end   -- shared by others: the 1-minute batch
     end)
 end
 
@@ -987,7 +987,10 @@ local function takeMobs(mapID, body, sender, hashIn, fromSwarm)
             brought(what, tag)
         end
     end
-    if changed and VQ.Mobs and VQ.Mobs.Refresh then VQ.Mobs:Refresh() end
+    -- shared mob spots: into the markers once a minute (the user: "update every 1 min, just the changes")
+    if changed and VQ.Mobs and VQ.Mobs.Refresh and not VQ.Mobs.soon then
+        VQ.Mobs.soon = C_Timer.NewTimer(60, function() VQ.Mobs.soon = nil; VQ.Mobs:Refresh() end)
+    end
 end
 
 -- Confirmed crowd spots for a mob on a map, as "xxxyyy..." (like ForeverSpawns), or "".

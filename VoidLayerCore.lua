@@ -43,7 +43,7 @@ local ADDON, ns = ...
 -- 2: a hop counts any move off your layer; the hop group is always left (2026-11-10)
 -- 3: one channel per faction, so this core must win over an older copy's both-factions one (2026-11-10)
 -- 4: layer names from the layer's own number, the same for every player (2026-11-14)
-local CORE_VERSION = 9   -- 9 (2026-11-17): VoidNet, the one channel + Help switch in every Void addon; 5 (2026-11-14): layer = server number only (canon); 6: S, players seen per layer; 7: group rejoin (GQ/GL/RJ/RA); 8: hosting from a Group Finder listing
+local CORE_VERSION = 10  -- 10 (2026-11-24): Move group (GM/GA/GI/GR/GX, section 8); 9 (2026-11-17): VoidNet, the one channel + Help switch in every Void addon; 5 (2026-11-14): layer = server number only (canon); 6: S, players seen per layer; 7: group rejoin (GQ/GL/RJ/RA); 8: hosting from a Group Finder listing
 
 local reg = _G.VoidLayerCoreReg or { list = {} }
 _G.VoidLayerCoreReg = reg
@@ -558,6 +558,7 @@ function ns.LayerCoreBuild(owner)
         -- refuse it (Sol release review)
         return self:HostingOn() and not hosting and not state and not finding
             and not (self.Rejoining and self:Rejoining())
+            and not (self.gm and (self.gm.run or self:Following()))   -- Move group: waiting for (or sending) the group's invites
             and not IsInGroup() and not InCombatLockdown() and not IsInInstance()
             and not UnitIsDeadOrGhost("player")
             and not (lastHosted and now() - lastHosted < HOST_GAP)
@@ -575,7 +576,7 @@ function ns.LayerCoreBuild(owner)
         if hosting then return "Bringing another Void player over right now; a moment." end
         if InCombatLockdown() then return "In combat." end
         if IsInInstance() then return "Not inside a dungeon or raid." end
-        if IsInGroup() then return "In a group: leave it to hop." end
+        if IsInGroup() then return "In a group: Move group takes the whole party along (or leave it to hop)." end
         local cd = self:CooldownLeft()
         if cd > 0 then return ("Next hop in %d:%02d (one every 5 minutes)."):format(math.floor(cd / 60), math.floor(cd % 60)) end
     end
@@ -615,7 +616,8 @@ function ns.LayerCoreBuild(owner)
         end
         say(("you're on |cffffd200%s|r now."):format(C:Label(state.zone, state.pair)))
         C.hlog("moved", state)
-        if C:StayOn() and not state.test then   -- a test always leaves (Sol review)
+        -- a test always leaves (Sol review); so does Move group: the mover invites the group next
+        if C:StayOn() and not state.test and not (C.gm and C.gm.run and C.gm.run.phase == "hopping") then
             send(("HS:1:%s"):format(state.nonce), state.host, true)
             stop("staying in the group so you keep this layer (it lasts up to 15 minutes); leave it when you're done.")
             return
@@ -768,6 +770,7 @@ function ns.LayerCoreBuild(owner)
     -- (lower first) or nil to skip that layer: fresh camp's choice (section 5).
     function C:Start(pair, expectZone, prefer, isRetry, rank)
         if finding and not isRetry then say("still looking for a Void player there; one moment.") return end
+        if C.gm and C.gm.run and C.gm.run.cancelled then changed() return end   -- Move group cancelled (section 8)
         local why = self:Blocked()
         if why then
             if not isRetry then say(why) end   -- a retry that can't go ahead (combat since) stays quiet
@@ -1059,6 +1062,8 @@ function ns.LayerCoreBuild(owner)
             end
         elseif tag == "GQ" or tag == "GL" or tag == "RJ" or tag == "RA" then
             if onGroupMsg then onGroupMsg(tag, msg, who) end
+        elseif tag == "GM" or tag == "GA" or tag == "GI" or tag == "GR" or tag == "GX" then
+            if C.gm then C.gm.onMsg(tag, msg, who) end   -- section 8, Move group
         end
     end
 
@@ -2182,6 +2187,354 @@ function ns.LayerCoreBuild(owner)
     end
 
     ------------------------------------------------------------------
+    -- 8. Move group (core 10, 2026-11-24; the user, questing in a party of three on a layer full of the
+    -- other faction: one left, found a layer and re-invited the others through the guild list, "a very
+    -- convoluted, complex process"). Anyone in a party clicks Move group. The others are told and stay
+    -- grouped together; the mover leaves, takes a Fresh layer hop (a Void helper on another layer) and,
+    -- once there, calls them: each one leaves the old group, says so (GR), and the mover invites them.
+    -- Joining a group puts you on its leader's layer (measured 11-08) and the mover leads the new group, so
+    -- everyone lands on the new layer. A member's VoidLayer accepts only the mover's invite, only after the
+    -- call. Members without VoidLayer (no GA back) get a whisper at the call: leave, accept the invite.
+    -- Nobody leaves until a helper on another layer is known. If the hop then fails or is cancelled, the
+    -- mover calls the group all the same (it comes back together, on the old layer).
+    --   GM:1:nonce  mover -> each member, while still grouped: "I'm moving us; wait for my call"
+    --   GA:1:nonce  member -> mover: got it (VoidLayer runs here)
+    --   GI:1:nonce  mover -> members, from the new layer: "leave your group now, my invite follows"
+    --   GR:1:nonce  member -> mover: out of the old group, invite me
+    --   GX:1:nonce  mover -> members: cancelled, stop waiting
+    -- Two players clicking at once (Sol review): the one whose name sorts first moves, the other follows.
+    -- One table field, no new locals: LayerCoreBuild is at Lua 5.1's 200-locals limit.
+    ------------------------------------------------------------------
+    C.gm = { FOLLOW = 300, HOP_MAX = 220, CALL_FOR = 150, RETRY = 12, TRIES = 5, ACK_WAIT = 5,
+             dead = {} }   -- ["name:nonce"] = t: moves cancelled (GX), so a late GM for one is ignored
+
+    -- why the group can't move right now (nil = it can)
+    function C.gm.why()
+        if not forever() then return "Layers are a WoW Forever thing." end
+        if not IsInGroup() then return "Only in a party." end
+        if IsInRaid() then return "A party only (up to 5), not a raid." end
+        if C.gm.run then return "Already moving the group." end
+        if state or finding or hosting then return "A hop is under way." end
+        if C:Rejoining() then return "Waiting for a re-invite." end
+        if C:Following() then return "Already following someone to a new layer." end
+        if InCombatLockdown() then return "Not in combat." end
+        if IsInInstance() then return "Not inside a dungeon or raid." end
+        local cd = C:CooldownLeft()
+        if cd > 0 then return ("Next hop in %d:%02d (one every 5 minutes)."):format(math.floor(cd / 60), math.floor(cd % 60)) end
+        if not Layer:Here() then return "Your layer isn't known yet: point at or target any NPC." end
+    end
+    function C:MoveGroupBlocked() return C.gm.why() end
+    function C:MovingGroup() return C.gm.run end
+    function C:Following()
+        local fl = C.gm.follow
+        if fl and now() - fl.t > C.gm.FOLLOW then C.gm.follow, fl = nil, nil end
+        return fl
+    end
+
+    -- the names in your group now (yourself not included)
+    function C.gm.roster()
+        local out = {}
+        for _, u in ipairs(groupUnits()) do
+            local n = fullName(u)
+            if n and n ~= me then out[#out + 1] = n end
+        end
+        return out
+    end
+    -- still the group we started with: in a group, and nobody in it who wasn't then (Sol review: a group
+    -- joined since must never be left by a timer)
+    function C.gm.same(names)
+        if not IsInGroup() then return false end
+        local was = {}
+        for _, n in ipairs(names) do was[n] = true end
+        for _, n in ipairs(C.gm.roster()) do if not was[n] then return false end end
+        return true
+    end
+
+    -- a Void helper on another layer of this zone (else nobody leaves)
+    function C.gm.helpers(zone, cur)
+        for p in pairs(C:Counts(zone)) do
+            if p ~= cur and #C:Hosts(zone, p) > 0 then return true end
+        end
+        return false
+    end
+    -- Fresh layer's order, but a layer you cleared yourself goes last instead of being skipped
+    function C.gm.rank(zone)
+        local r = freshRank(zone)
+        return function(p) return r(p) or 9 end
+    end
+    function C.gm.tell(run, tag, list)
+        for _, n in ipairs(list or run.names) do send(("%s:1:%s"):format(tag, run.nonce), n, true) end
+    end
+
+    function C:MoveGroup()
+        local why = C.gm.why()
+        if why then say(why) return false end
+        local cur, zone = Layer:Here()
+        local names = C.gm.roster()
+        if #names == 0 then say("nobody else in the group.") return false end
+        local run = { nonce = tostring(math.random(100000, 999999)), phase = "finding", names = names,
+                      zone = zone, from = cur, t = now(), acked = {}, ready = {} }
+        C.gm.run = run
+        local function nobody()
+            C.gm.run = nil
+            say("nobody on another layer here can bring the group over right now, so nobody left. Try again in a few minutes.")
+            changed()
+        end
+        if C.gm.helpers(zone, cur) then
+            C.gm.go(run)
+        elseif self:Ask(zone) then
+            say("looking for a Void player on another layer who can bring the group over...")
+            C_Timer.After(FIND_WAIT, function()
+                if C.gm.run ~= run or run.phase ~= "finding" then return end
+                if C.gm.helpers(zone, cur) then C.gm.go(run) else nobody() end
+            end)
+        else
+            nobody()
+        end
+        changed()
+        return true
+    end
+
+    -- a helper is known: tell the group (while still in it), then leave and hop
+    function C.gm.go(run)
+        local _, zone = Layer:Here()
+        if not C.gm.same(run.names) or InCombatLockdown() or IsInInstance() or zone ~= run.zone then
+            C.gm.run = nil
+            say("group move cancelled: your group, your zone or the fight changed.")
+            changed()
+            return
+        end
+        run.phase, run.told = "telling", now()
+        C.gm.tell(run, "GM")
+        say(("moving the group: you hop to a fresh layer, then call the others over (%d)."):format(#run.names))
+        -- wait for every answer (or ACK_WAIT): a GM that arrives after you left would be refused (Sol review)
+        local function leave()
+            if C.gm.run ~= run or run.phase ~= "telling" then return end
+            local all = true
+            for _, n in ipairs(run.names) do if not run.acked[n] then all = false end end
+            if not all and now() - run.told < C.gm.ACK_WAIT then C_Timer.After(0.5, leave) return end
+            if InCombatLockdown() or IsInInstance() or not C.gm.same(run.names) then C:MoveGroupCancel() return end
+            run.phase, run.left, run.hopT = "hopping", now(), now()
+            if C_PartyInfo and C_PartyInfo.LeaveParty then C_PartyInfo.LeaveParty() end
+            -- the hop needs you solo: wait for the game to take you out (a few seconds at most)
+            local function hop(n)
+                if C.gm.run ~= run or run.phase ~= "hopping" or run.cancelled then return end
+                if IsInGroup() and n < 5 then C_Timer.After(1, function() hop(n + 1) end) return end
+                run.started = true
+                C:Start(nil, run.zone, nil, false, C.gm.rank(run.zone))
+            end
+            C_Timer.After(1.5, function() hop(0) end)
+            changed()
+        end
+        C_Timer.After(0.5, leave)
+        changed()
+    end
+
+    -- out of every group: call the group over. VoidLayer members leave and say GR (invited at once);
+    -- the others get a whisper and an invite now and every RETRY s
+    function C.gm.call(run)
+        run.phase, run.inv, run.called, run.tries = "inviting", now(), now(), 1
+        run.moved = lastHop ~= nil and lastHop >= run.hopT
+        C.gm.tell(run, "GI")
+        local plain = {}
+        for _, n in ipairs(run.names) do if not run.acked[n] then plain[#plain + 1] = n end end
+        for i, n in ipairs(plain) do
+            if SendChatMessage then
+                pcall(SendChatMessage, "VoidLayer: I'm moving our group to a quieter layer. Please leave the group now (type /leave) and accept my invite.", "WHISPER", nil, n)
+            end
+            C_Timer.After(2 + 0.4 * i, function()
+                if C.gm.run == run and not unitOf(n) and C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(n) end
+            end)
+        end
+        local cur, zone = Layer:Here()
+        say(run.moved and ("on %s: calling the group over."):format(C:Label(zone, cur))
+            or "the hop didn't happen, so you're calling the group back together (same layer as before).")
+        changed()
+    end
+    function C.gm.ready(run, who)
+        if run.ready[who] or unitOf(who) then return end
+        run.ready[who] = true
+        if C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(who) end
+    end
+
+    function C.gm.tick()
+        for k, t in pairs(C.gm.dead) do if now() - t > 600 then C.gm.dead[k] = nil end end
+        local run = C.gm.run
+        if not run then return end
+        if run.phase == "hopping" and run.started then
+            -- moved and out of the helper's group, or the hop ended without moving: call the group
+            if not IsInGroup() and (not state or state.phase == "left") and not finding then
+                C.gm.call(run)
+            elseif now() - run.left > C.gm.HOP_MAX then
+                say("the hop is taking too long; calling the group back.")
+                C:MoveGroupCancel()
+            end
+        elseif run.phase == "inviting" then
+            local missing = {}
+            for _, n in ipairs(run.names) do if not unitOf(n) then missing[#missing + 1] = n end end
+            if #missing == 0 then
+                C.gm.run = nil
+                say(run.moved and "the whole group is on the new layer." or "the group is back together.")
+                changed()
+            elseif now() - run.called > C.gm.CALL_FOR then
+                C.gm.run = nil
+                C.gm.tell(run, "GX", missing)
+                say(("%s didn't come; invite them by hand (right-click their name in chat)."):format(table.concat(missing, ", ")))
+                changed()
+            elseif now() - run.inv >= C.gm.RETRY and run.tries < C.gm.TRIES then
+                -- again for those without VoidLayer, and for a VoidLayer member whose invite got lost
+                run.tries, run.inv = run.tries + 1, now()
+                for _, n in ipairs(missing) do
+                    if (not run.acked[n] or run.ready[n]) and C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(n) end
+                end
+            end
+        end
+    end
+
+    -- Cancel: the mover stops (the group gets called back once you've left it); a member stops following
+    function C:MoveGroupCancel()
+        local run = C.gm.run
+        if run then
+            if run.phase == "finding" then
+                C.gm.run = nil
+                say("group move cancelled; nobody left.")
+            elseif run.phase == "telling" then
+                -- still in the group, nobody has left: they just stop waiting
+                C.gm.run = nil
+                C.gm.tell(run, "GX")
+                say("group move cancelled; nobody left.")
+            elseif run.phase == "hopping" then
+                if state then
+                    local host = state.host
+                    stop("hop cancelled.")
+                    if host then leaveHopGroup(host) end
+                end
+                -- the tick calls the group once you're out of the helper's group; a helper search still
+                -- running finds C:Start refusing (run.cancelled)
+                run.cancelled, run.started, run.left = true, true, now()
+            elseif run.phase == "inviting" then
+                C.gm.run = nil
+                local out = {}
+                for _, n in ipairs(run.names) do if not unitOf(n) then out[#out + 1] = n end end
+                C.gm.tell(run, "GX", out)
+                say("stopped calling the group.")
+            end
+        end
+        local fl = C.gm.follow
+        if fl then
+            C.gm.follow = nil
+            say(("you won't follow %s: their invite will just show up as usual."):format(fl.leader))
+        end
+        changed()
+    end
+
+    -- member side: out of the old group (now, or after a fight), then GR so the mover invites you
+    function C.gm.leave(fl, n)
+        if C.gm.follow ~= fl then return end
+        -- in a fight: right after it (the mover's call lasts CALL_FOR). Solo too: an invite now would be
+        -- refused and the mover's tries could run out before the fight ends (Sol review)
+        if InCombatLockdown() then
+            if n < 120 then C_Timer.After(1, function() C.gm.leave(fl, n + 1) end) end
+            return
+        end
+        if IsInInstance() or (IsInGroup() and not C.gm.same(fl.names)) then
+            C.gm.follow = nil
+            say(("not following %s: you're in another group or inside by now."):format(fl.leader))
+            changed()
+            return
+        end
+        if not IsInGroup() then send(("GR:1:%s"):format(fl.nonce), fl.leader, true) return end
+        if not fl.leftAt and C_PartyInfo and C_PartyInfo.LeaveParty then fl.leftAt = now(); C_PartyInfo.LeaveParty() end
+        if n < 125 then C_Timer.After(1, function() C.gm.leave(fl, n + 1) end) end
+    end
+
+    function C.gm.onMsg(tag, msg, who)
+        local nonce = msg:match("^%u%u:1:(%d+)$")
+        if not nonce then return end
+        local run = C.gm.run
+        if tag == "GM" then
+            if not unitOf(who) or IsInInstance() then return end
+            -- a move already cancelled (its GX can overtake its GM in the send queue; Sol review)
+            if C.gm.dead[who .. ":" .. nonce] then return end
+            -- already following another mover: the name that sorts first, as below (Sol review)
+            local cur = C:Following()
+            if cur and (cur.phase ~= "wait" or cur.leader < who) then return end
+            if run then
+                -- both clicked: the name that sorts first moves (both sides decide the same way)
+                if (run.phase == "finding" or run.phase == "telling") and who < me then
+                    C.gm.run = nil
+                    if run.phase == "telling" then C.gm.tell(run, "GX") end
+                    say(("%s is moving the group already; you follow them instead."):format(who))
+                else
+                    return
+                end
+            end
+            C.gm.follow = { leader = who, nonce = nonce, t = now(), phase = "wait", names = C.gm.roster() }
+            send(("GA:1:%s"):format(nonce), who, true)
+            say(("%s is finding a quieter layer for the group. Keep playing: once they're there, you leave and rejoin them by yourself."):format(who))
+            changed()
+        elseif tag == "GA" then
+            if run and nonce == run.nonce then run.acked[who] = true end
+        elseif tag == "GR" then
+            if run and run.phase == "inviting" and nonce == run.nonce then
+                for _, n in ipairs(run.names) do if n == who then C.gm.ready(run, who) end end
+            end
+        else
+            if tag == "GX" then C.gm.dead[who .. ":" .. nonce] = now() end
+            local fl = C:Following()
+            if not (fl and fl.leader == who and fl.nonce == nonce) then return end
+            if tag == "GI" and fl.phase == "wait" then
+                fl.phase, fl.t = "go", now()
+                say(("%s is on the new layer: leaving the group to join them."):format(who))
+                C.gm.leave(fl, 0)
+            elseif tag == "GX" then
+                C.gm.follow = nil
+                say(("%s stopped moving the group."):format(who))
+            end
+            changed()
+        end
+    end
+
+    -- member side: the mover's invite after the call, and only that one
+    function C.gm.accept(from)
+        local fl = C:Following()
+        if not (fl and fl.phase == "go") then return false end
+        if type(from) ~= "string" or secret(from) or Net.Canon(from) ~= fl.leader then return false end
+        if IsInGroup() or InCombatLockdown() or IsInInstance() then return false end
+        C.gm.follow = nil
+        AcceptGroup()
+        C_Timer.After(0, function()
+            local d = StaticPopup_FindVisible and StaticPopup_FindVisible("PARTY_INVITE")
+            if d then d.inviteAccepted = 1 end
+            StaticPopup_Hide("PARTY_INVITE")
+            C.hideLfgPopup()
+        end)
+        say(("back in %s's group, on their layer."):format(fl.leader))
+        changed()
+        return true
+    end
+
+    function C:GroupMoveStatus()
+        local run = C.gm.run
+        if run then
+            if run.phase == "finding" then return "Looking for a Void player on another layer for the group..." end
+            if run.phase == "telling" then return "Telling the group..." end
+            if run.phase == "hopping" then return (self:Status() or "Hopping...") .. " Then you call the group over." end
+            if run.phase == "inviting" then
+                local n = 0
+                for _, name in ipairs(run.names) do if unitOf(name) then n = n + 1 end end
+                return ("Calling the group over: %d of %d here."):format(n, #run.names)
+            end
+        end
+        local fl = self:Following()
+        if fl then
+            return fl.phase == "go" and ("Joining %s on the new layer..."):format(fl.leader)
+                or ("%s is finding a quieter layer for the group; you'll follow by yourself."):format(fl.leader)
+        end
+    end
+    C_Timer.NewTicker(1, function() pcall(C.gm.tick) end)
+
+    ------------------------------------------------------------------
     -- Events
     ------------------------------------------------------------------
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then C_ChatInfo.RegisterAddonMessagePrefix(PREFIX) end
@@ -2261,7 +2614,11 @@ function ns.LayerCoreBuild(owner)
             C_Timer.After(2, function() pcall(askLeader, true) end)
             changed()
         elseif event == "PARTY_INVITE_REQUEST" then
-            -- the leader's invite back after a rejoin (section 6)
+            -- the mover's invite after Move group (section 8), then the leader's back after a rejoin (section 6)
+            local okG, tookG = pcall(C.gm.accept, a1)
+            if okG and tookG then return end
+            -- following a group move: no other invite is taken (or turned around) by itself (Sol review)
+            if C:Following() then return end
             if rejoinInvite(a1) then return end
             -- the player you just whispered for a swap (guest side of section 7): accept, no role window
             if not (state and state.phase == "asking") then

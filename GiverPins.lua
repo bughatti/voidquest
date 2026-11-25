@@ -24,7 +24,27 @@ local G = VQ.Givers
 -- Needed givers on a map: { {questID, name, x, y}, ... }. Cached per map; any quest /
 -- density / guide change invalidates.
 local cache = {}
-function G:Invalidate() cache = {} end
+-- Static minimap pins (perf pass 2026-11-24, the user: "static, update less often"): UpdateMinimap ran every frame;
+-- now it only re-places them when your map, spot, facing, the minimap's zoom / size / rotation changed, or the givers
+-- did (Invalidate: your quest events at once; learned / shared givers in the once-a-minute pass below; the user:
+-- "static pins, and update every 1 min, just the changes"). No per-second timer.
+local last = { dirty = true }
+local function unchanged()
+    local m = C_Map.GetBestMapForUnit("player")
+    local pp = m and C_Map.GetPlayerMapPosition(m, "player")
+    local x, y
+    if pp then x, y = pp:GetXY() end
+    local f = GetPlayerFacing() or 0
+    local r = (C_Minimap and C_Minimap.GetViewRadius and C_Minimap.GetViewRadius()) or 0
+    local wd, rot = Minimap:GetWidth(), GetCVar("rotateMinimap")
+    if not last.dirty and m == last.m and x == last.x and y == last.y and f == last.f and r == last.r and wd == last.w
+       and rot == last.rot then return true end
+    last.m, last.x, last.y, last.f, last.r, last.w, last.rot, last.dirty = m, x, y, f, r, wd, rot, false
+    return false
+end
+function G:Invalidate() cache = {}; last.dirty = true end
+-- givers learned from NPCs or shared by other players since: into the pins once a minute
+C_Timer.NewTicker(60, function() if Minimap and Minimap:IsVisible() then G:Invalidate() end end)
 
 function G:For(mapID)
     if not mapID then return {} end
@@ -128,6 +148,7 @@ local function hideRest()
 end
 
 function G:UpdateMinimap()
+    if unchanged() then return end   -- nothing moved: the pins are where they belong
     nActive = 0
     if VQ:Get("giverPins") == false then hideRest(); return end
     local mapID = C_Map.GetBestMapForUnit("player")
@@ -175,6 +196,9 @@ for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_REGEN_ENABLED", "ZONE_CHANGED_NEW_A
     pcall(ev.RegisterEvent, ev, e)
 end
 ev:SetScript("OnEvent", function(_, e, arg)
+    -- no quest lines on WoW Forever, yet this fired ~1,000 times a session and threw the giver pins away each time
+    -- (perf pass round 2, 2026-11-25): ignored there
+    if e == "QUESTLINE_UPDATE" and VQ.ForeverQuests then return end
     if e == "PLAYER_LOGIN" then
         if WorldMapFrame and not G.provider then
             G.provider = CreateFromMixins(VoidQuestGiverProviderMixin)
