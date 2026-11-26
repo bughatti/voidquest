@@ -58,6 +58,10 @@ VN.EXPLORE      = 0.25               -- chance a full pick trades one known user
 VN.SEEN_LIVE    = 7200               -- a one-channel read older than this no longer proves "new version"
 VN.MAX_SLOT     = 3
 VN.PING_EVERY, VN.PING_TRIES, VN.PING_WAIT = 30, 3, 30
+VN.PINGERS      = 8                  -- about this many clients check a new owner at once (the rest wait, see Guard)
+VN.PING_LATER, VN.PING_SPREAD = 120, 900   -- the others check from 2 minutes on, spread over 15 minutes
+VN.CHECK_SOON   = 30                 -- told "we moved": check the owner within this many seconds
+VN.LOCK_SPREAD  = 300                -- a check that came due while whispers were held back: re-spread over this
 VN.PEER_FRESH   = 3600               -- a Void player heard from within this is trusted (owner, hand-over)
 VN.REMEMBER     = 7200               -- saved memory of Void players: 2 hours, then deleted
 VN.HOSTILE_FOR  = 86400              -- a hostile mark lasts 24 hours
@@ -151,6 +155,9 @@ function VN.BuildCore()
     -- never makes a stranger trusted: Sol-style rule, the tests' "stranger is ignored")
     function C:IsMember(name)
         if not validName(name) then return false end
+        -- the owner the game named: a list of 300+ is read in a window that often misses row 1, and its answer to our
+        -- ping was then dropped as a stranger's, so a healthy owner "never answered" (vnet-hour-sim, 500 players)
+        if name == self.owner then return true end
         local t = self.seen[name]
         if t and time() - t < VN.PEER_FRESH then return true end
         for _, n in ipairs(self.main.roster or {}) do if n == name then return true end end
@@ -352,6 +359,11 @@ function VN.BuildCore()
         C_Timer.After(2 + #self.queue * VN.SEND_EVERY, function()
             self:Join()
             C_Timer.After(3, function() self.main:RequestRoster(true) end)
+            -- everyone arrives over the next ~15 s (each client's own hour tick): read the list again, or the count
+            -- showed the first dozen arrivals until the 5-minute re-read (live 11-26: 13 right after noon)
+            for _, t in ipairs({ 30, 90 }) do
+                C_Timer.After(t, function() if self.channel == name then self.main:RequestRoster(true) end end)
+            end
         end)
         self:Notify()
     end
@@ -360,15 +372,18 @@ function VN.BuildCore()
     -- each client passes it on once (it moves once per slot, so it can't echo)
     function C:TellMoved(s)
         local told, n = {}, 0
-        local function tell(name)
-            if n < VN.TELL and name and name ~= self.me and not told[name] and self:Fresh(name) then
+        local function tell(name, mate)
+            if n < VN.TELL and name and name ~= self.me and not told[name] and not self:Hostile(name)
+                and (mate or self:Fresh(name)) then
                 told[name] = true; n = n + 1; self:Send(name, ("M:%d:%d"):format(s, self.hour))
             end
         end
         tell(self.owner)
+        -- channel-mates, heard from or not: one who never heard from us can't follow us, but it checks the owner
+        -- itself right away (see "M"), so the network finds a silent owner in minutes (vnet-hour-sim -squat)
         local list = self.main.roster or {}
         local start = #list > 0 and math.random(#list) or 1
-        for k = 0, #list - 1 do tell(list[(start - 1 + k) % #list + 1]) end
+        for k = 0, #list - 1 do tell(list[(start - 1 + k) % #list + 1], self.main:Reachable(list[(start - 1 + k) % #list + 1])) end
         for name in pairs(self.state.peers) do tell(name) end
     end
 
@@ -390,12 +405,40 @@ function VN.BuildCore()
         local o = self.owner
         if o and self:Hostile(o) then return self:Move("owner is hostile") end
         if not o or o == self.me or self:Fresh(o) then return end
-        local p = self.pinged[o] or { n = 0, at = -VN.PING_EVERY }
-        self.pinged[o] = p
         local now = time()
+        local p = self.pinged[o]
+        if not p then
+            -- only about VN.PINGERS clients check a new owner right away; the others check later, spread out. On
+            -- the hour every client pinged the new owner at once, it could answer ~1 a second, and with 200+ players
+            -- most gave up on it and moved: the network split over all 4 channels every hour (live 2026-11-26).
+            -- A silent owner is still found by the first checkers within ~2 minutes; their "we moved" brings the rest.
+            local members = #(self.main.roster or {}) + 1
+            local wait = 0
+            if members > VN.PINGERS and math.random() * members >= VN.PINGERS then
+                wait = VN.PING_LATER + math.random() * VN.PING_SPREAD
+            end
+            p = { n = 0, at = -VN.PING_EVERY, from = now + wait }
+            self.pinged[o] = p
+        end
+        if now < p.from then
+            -- one timer per deadline: when the deadline moves (CheckSoon, a re-spread in a hold) a new one is set;
+            -- an older timer just calls Guard early, which waits again (Sol review, 2026-11-26)
+            if p.armed ~= p.from then
+                local want = p.from
+                p.armed = want
+                C_Timer.After(want - now + 0.5, function() self:Guard() end)
+            end
+            return
+        end
         -- while the game holds whispers back (some fights) neither a ping nor its answer gets through
         if chatLocked() then
-            if p.n > 0 then p.at = now end
+            if p.n > 0 then p.at, p.first = now, now end   -- a hold isn't silence: neither the wait nor the doubt runs
+            -- a check not started yet that came due here: spread it out again, or every client whose turn passed
+            -- during the hold would ping the owner together once it lifts (Sol review, 2026-11-26)
+            if p.n == 0 then
+                p.from = now + VN.PING_EVERY + math.random() * VN.LOCK_SPREAD
+                return self:Guard()
+            end
             if not self.G.lockWait then
                 self.G.lockWait = true
                 C_Timer.After(VN.PING_WAIT, function() self.G.lockWait = nil; self:Guard() end)
@@ -408,9 +451,19 @@ function VN.BuildCore()
         end
         if now - p.at < VN.PING_EVERY then return end
         p.n, p.at = p.n + 1, now
+        p.first = p.first or now
         log("PING", o, tostring(p.n))
         self:Send(o, "O:" .. p.n)
         C_Timer.After(VN.PING_EVERY + 1, function() self:Guard() end)
+    end
+
+    -- a Void player says the owner is gone: if our own check of it is still waiting its turn (see Guard), do it
+    -- within VN.CHECK_SOON s instead. Never a move by itself, so a griefer can only make us ping a little earlier.
+    function C:CheckSoon(o)
+        local p = o and o == self.owner and o ~= self.me and not self:Fresh(o) and self.pinged[o]
+        if not (p and p.from and p.from > time() + VN.CHECK_SOON) then return end
+        p.from = time() + math.random() * VN.CHECK_SOON
+        self:Guard()   -- sets the timer for the new deadline
     end
 
     -- sure = learned from the game's own notice or the old owner's word. The member list's owner flag is often STALE
@@ -538,24 +591,27 @@ function VN.BuildCore()
             local s, h = msg:match("^M:(%d):(%d+)$")
             s, h = tonumber(s), tonumber(h)
             if not (s and h) or h ~= self.hour or s <= self.slot or s > VN.MAX_SLOT then return end
-            -- only from a player heard from before this message who was in our channel at the last read
-            if not knew then return end
+            -- only from a player who was in our channel at the last read; to move, also heard from before this message
             local mate = false
             for _, n in ipairs(self.main.roster or {}) do if n == sender then mate = true break end end
             if not mate then return end
+            local o = self.owner
+            if not knew then self:CheckSoon(o) return end   -- a channel-mate we don't know: only a reason to look
             -- and only with proof (Sol, 2026-11-17: one griefer running the addon could otherwise push everyone
             -- to the last backup and use them all up): our own guard already doubts the owner (pinged and
             -- not answered, or marked hostile), or 2 different Void players say so. Every client sees a ban or
             -- a silent owner itself, so this only makes the network follow faster, never slower.
-            local o = self.owner
-            local doubt = o and o ~= self.me and ((self.pinged[o] and self.pinged[o].n > 0) or self:Hostile(o))
+            -- doubt = our ping has gone unanswered for PING_EVERY s (not merely sent: one member's "we moved" pulls our
+            -- check forward, and its second one must not move us before the owner could answer; Sol review 11-26)
+            local pp = o and self.pinged[o]
+            local doubt = o and o ~= self.me and ((pp and pp.n > 0 and pp.first and time() - pp.first >= VN.PING_EVERY) or self:Hostile(o))
             if not (doubt and s == self.slot + 1) then   -- one voice moves us one step at most (Sol re-check)
                 self.votes = (self.votes and self.votes.h == h and self.votes.s0 == self.slot) and self.votes
                     or { h = h, s0 = self.slot, by = {} }
                 self.votes.by[sender] = s
                 local n = 0
                 for _, vs in pairs(self.votes.by) do if vs >= s then n = n + 1 end end
-                if n < 2 then return end
+                if n < 2 then self:CheckSoon(o) return end   -- one voice can't move us: but we look ourselves now
             end
             log("FOLLOWED", sender, tostring(s))
             self:TellMoved(s)

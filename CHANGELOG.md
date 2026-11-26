@@ -1,5 +1,9 @@
 # VoidQuest Changelog
 
+## 0.3.51 — 2026-11-26
+
+- **Fixed: Void players losing each other every hour (WoW Forever).** On the hour, every player's addon checked the new hour's shared channel at once. With 200+ players the channel's owner couldn't answer them all in time, so most addons gave up on it and moved to backup channels: within minutes everyone was spread over 4 channels, sharing only with a slice of the others, and the players box dropped (230 to 65 on the Alliance side). Now a few players check right away and the rest later, spread out, so everyone stays together. A channel taken over by someone else is still left within minutes. Also: the players box shows the right count a minute after the hour instead of five, and a channel's owner is no longer missed in channels of 300+ players.
+
 ## 0.3.50 — 2026-11-25
 
 - **VoidHub window (WoW Forever):** right-click the VoidHub minimap button (or type /vhub) for every Void addon in one window: quests, layers, gear, gold, professions, combat, dungeons and more, each drawn from its own addon, with a Start page for what to do right now. Addons you don't have show a screenshot and how to get them. Shift + right-click opens Copy settings from another character. It comes inside every Void addon: nothing extra to install.
