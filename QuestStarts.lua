@@ -133,6 +133,77 @@ local function Gray(q, ql, lvl)
     local range = safe(UnitQuestTrivialLevelRange, "player") or 5
     return lvl - ql > range
 end
+-- Reputation gates (2026-11-25, Blackmaw Hold): Blizzard's API and NorgannonDB say Neutral Timbermaw,
+-- the game held the quests back at 810. For a giver whose quests have a reputation rule, save what it
+-- offered, what it held back and your raw standing then (VoidQuestCharDB.repOffers[npc], last 8
+-- distinct visits), so the real threshold can be measured. Logging only; nothing reads it in game yet.
+local function LogRepOffers(npc, offered, lvl)
+    local rules, F = VQ.ForeverRules, VQ.Forever
+    if not (rules and F and C_Reputation and C_Reputation.GetFactionDataByID) then return end
+    local facs, held, any = {}, {}, false
+    for q in pairs(VQ.ForeverQuests) do
+        local rr = rules[q]
+        if rr and rr.rp and S:Giver(q) == npc then
+            any = true
+            facs[rr.rp[1]] = true
+            if not offered[q] and not safe(C_QuestLog.IsQuestFlaggedCompleted, q)
+                and not safe(C_QuestLog.GetLogIndexForQuestID, q) then held[#held + 1] = q end
+        end
+    end
+    if not any then return end
+    local rep = {}
+    for fid in pairs(facs) do
+        local d = safe(C_Reputation.GetFactionDataByID, fid)
+        local raw = d and d.currentStanding
+        if type(raw) == "number" and not Secret(raw) then rep[fid] = raw end
+    end
+    local got = {}
+    for q in pairs(offered) do got[#got + 1] = q end
+    table.sort(got); table.sort(held)
+    local key = table.concat(got, ",") .. "|" .. table.concat(held, ",")
+    for fid, raw in pairs(rep) do key = key .. "|" .. fid .. "=" .. raw end
+    VoidQuestCharDB.repOffers = VoidQuestCharDB.repOffers or {}
+    local list = VoidQuestCharDB.repOffers[npc] or {}
+    VoidQuestCharDB.repOffers[npc] = list
+    if list[#list] and list[#list].key == key then return end
+    list[#list + 1] = { key = key, t = date("%Y-%m-%d %H:%M"), lvl = lvl, rep = rep, offered = got, held = held }
+    while #list > 8 do table.remove(list, 1) end
+end
+
+-- Your standing with every faction a quest rule asks for, saved wherever you are (no giver visit needed):
+-- VoidQuestCharDB.repNow[factionID] = { raw = now, lo = lowest seen, hi = highest seen, t = when }.
+-- With "the giver held it back at 810" this tells Neutral 810 from Unfriendly 810 (2026-11-25).
+local repFacs
+local function SaveRep()
+    local rules = VQ.ForeverRules
+    if not (rules and VoidQuestCharDB and C_Reputation and C_Reputation.GetFactionDataByID) then return end
+    if not repFacs then
+        repFacs = {}
+        for _, rr in pairs(rules) do if type(rr) == "table" and rr.rp then repFacs[rr.rp[1]] = true end end
+    end
+    VoidQuestCharDB.repNow = VoidQuestCharDB.repNow or {}
+    for fid in pairs(repFacs) do
+        local d = safe(C_Reputation.GetFactionDataByID, fid)
+        local raw = d and d.currentStanding
+        if type(raw) == "number" and not Secret(raw) then
+            local e = VoidQuestCharDB.repNow[fid] or {}
+            VoidQuestCharDB.repNow[fid] = e
+            e.raw, e.t = raw, date("%Y-%m-%d %H:%M")
+            if not e.lo or raw < e.lo then e.lo = raw end
+            if not e.hi or raw > e.hi then e.hi = raw end
+        end
+    end
+end
+local repPending
+local repEv = CreateFrame("Frame")
+repEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+repEv:RegisterEvent("UPDATE_FACTION")
+repEv:SetScript("OnEvent", function()
+    if repPending or not VQ.ForeverQuests then return end
+    repPending = true
+    C_Timer.After(2, function() repPending = nil; SaveRep() end)
+end)
+
 -- Returns true when what's available changed (the zone list / map need a redraw).
 local function LearnLevels(npc, ids, complete)
     if not (VQ.ForeverQuests and npc and VoidQuestDB and VoidQuestCharDB) then return false end
@@ -151,6 +222,7 @@ local function LearnLevels(npc, ids, complete)
     end
     if not complete then return changed end
     local F = VQ.Forever
+    LogRepOffers(npc, offered, lvl)
     for q, r in pairs(VQ.ForeverQuests) do
         if not offered[q] and S:Giver(q) == npc and (not F or F:Eligible(r))
             and not safe(C_QuestLog.IsQuestFlaggedCompleted, q) and not safe(C_QuestLog.GetLogIndexForQuestID, q) then

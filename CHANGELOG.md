@@ -1,5 +1,10 @@
 # VoidQuest Changelog
 
+## 0.3.50 — 2026-11-25
+
+- **VoidHub window (WoW Forever):** right-click the VoidHub minimap button (or type /vhub) for every Void addon in one window: quests, layers, gear, gold, professions, combat, dungeons and more, each drawn from its own addon, with a Start page for what to do right now. Addons you don't have show a screenshot and how to get them. Shift + right-click opens Copy settings from another character. It comes inside every Void addon: nothing extra to install.
+- Notes your reputation at quest givers whose quests need one, to find the real requirement where the game's own quest data is wrong (Blackmaw Hold's Timbermaw quests).
+
 ## 0.3.49 — 2026-11-25
 
 - **Much lighter on your computer.** VoidQuest was the heaviest Void addon: its guide panel redrew itself several times a second, on every loot. It now redraws only when your quest log really changes, and not at all on a flight path (once when you land). In our measurements it went from 1.57 to 0.28 ms a frame, and stutters dropped from 159 to 9 per 1000 frames.
