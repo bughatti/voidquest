@@ -36,6 +36,7 @@ H.WHERE = {
     VoidSweep   = "the Void hub (Help Void layer hopping)",
     VoidQuest   = "VoidQuest's settings",
     VoidBounty  = "VoidBounty's Settings tab",
+    VoidHonor   = "VoidHonor's Settings (in the Void hub)",
     VoidGather  = "the Void hub (Help Void layer hopping)",
     VoidDungeon = "the Void hub (Help Void layer hopping)",
 }
@@ -46,6 +47,7 @@ local REG = {
     VoidQuest   = { prio = 0.4, db = "VoidQuestCharDB" },
     VoidGather  = { prio = 0.3, db = "VoidGatherCharDB" },
     VoidBounty  = { prio = 0.2, db = "VoidBountyCharDB" },
+    VoidHonor   = { prio = 0.2, db = "VoidHonorBountyCharDB" },   -- VoidBounty's world PvP moved here (11-27)
     VoidDungeon = { prio = 0.1, db = "VoidDungeonCharDB" },
 }
 local r = REG[ADDON]
