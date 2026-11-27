@@ -4478,6 +4478,11 @@ local function MouseHeldOver(f)
 end
 
 function mod:Refresh()
+    -- In a battleground or arena the guide has nothing to show, and the events that ask for a redraw fire nonstop
+    -- there (Alterac Valley, 2026-11-27: VoidQuest was half of all addon time, 1302 frames over 10 ms; the user: "my
+    -- game appears to be laggy"). Keep the last drawing; leaving fires a zone change, which redraws.
+    local _, instType = IsInInstance()
+    if instType == "pvp" or instType == "arena" then return end
     local f = self:EnsurePanel()
     -- (not during a live resize redraw: dragging the grip IS holding the mouse over the panel)
     if not f._live and MouseHeldOver(f) and (not self._clickHoldAt or GetTime() - self._clickHoldAt < 2) then
